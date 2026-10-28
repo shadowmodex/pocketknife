@@ -57,7 +57,16 @@ jobs:
             exit 1
           fi
           echo "Decoding release keystore into runner workspace..."
-          echo "$KEYSTORE_BASE64" | base64 --decode > app/android/app/pocketknife-release.jks
+          python3 -c "
+          import os, base64
+          raw = os.environ['KEYSTORE_BASE64']
+          decoded = base64.b64decode(raw.strip())
+          if len(decoded) < 512:
+              raise ValueError('Decoded keystore is too small or invalid.')
+          with open('app/android/app/pocketknife-release.jks', 'wb') as f:
+              f.write(decoded)
+          print('Keystore decoded successfully:', len(decoded), 'bytes')
+          "
 
       - name: Build Release APK
         working-directory: app
