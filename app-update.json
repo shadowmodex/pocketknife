@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
   "versionCode": 1,
-  "releaseNotes": "Initial release of Pocketknife with offline document & image tools.",
+  "releaseNotes": "• Complete offline file suite: PDF tools (Merge, Split, Compress, Text/Word to PDF) and Image Converter (single/batch).\n• In-app update system with verified SHA-256 integrity and automated releases.\n• Modern redesigned UI with dark/light themes and on-device activity history.",
   "apkUrl": "https://github.com/shadowmodex/pocketknife/releases/latest/download/PocketKnife.apk",
   "minimumSupportedVersion": "1.0.0",
   "sha256": null
