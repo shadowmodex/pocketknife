@@ -59,8 +59,8 @@ jobs:
           echo "Decoding release keystore into runner workspace..."
           python3 -c "
           import os, base64
-          raw = os.environ['KEYSTORE_BASE64']
-          decoded = base64.b64decode(raw.strip())
+          raw = os.environ['KEYSTORE_BASE64'].lstrip('\ufeff').strip()
+          decoded = base64.b64decode(raw)
           if len(decoded) < 512:
               raise ValueError('Decoded keystore is too small or invalid.')
           with open('app/android/app/pocketknife-release.jks', 'wb') as f:
