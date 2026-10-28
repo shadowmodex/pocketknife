@@ -1,0 +1,18 @@
+# Android Signing & Keystores (NEVER COMMIT)
+*.jks
+*.keystore
+*.p12
+*key.properties
+key.properties
+
+# Environment and secrets
+.env*
+*.pem
+*.cert
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+

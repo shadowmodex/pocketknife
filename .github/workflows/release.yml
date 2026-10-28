@@ -1,0 +1,133 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build & Release Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Analyze Project
+        working-directory: app
+        run: flutter analyze
+
+      - name: Run Unit Tests
+        working-directory: app
+        run: flutter test
+
+      - name: Validate & Configure Release Keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Required release signing secrets are missing in repository secrets!"
+            echo "Ensure KEYSTORE_BASE64, STORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD are set."
+            exit 1
+          fi
+          echo "Decoding release keystore into runner workspace..."
+          echo "$KEYSTORE_BASE64" | base64 --decode > app/android/app/pocketknife-release.jks
+
+      - name: Build Release APK
+        working-directory: app
+        env:
+          KEYSTORE_PATH: pocketknife-release.jks
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: flutter build apk --release
+
+      - name: Clean Up Decoded Keystore
+        if: always()
+        run: |
+          rm -f app/android/app/pocketknife-release.jks
+
+      - name: Prepare Release Asset & Checksum
+        run: |
+          if [ ! -f app/build/app/outputs/flutter-apk/app-release.apk ]; then
+            echo "::error::Release APK was not generated!"
+            exit 1
+          fi
+          cp app/build/app/outputs/flutter-apk/app-release.apk PocketKnife.apk
+          sha256sum PocketKnife.apk > PocketKnife.apk.sha256
+          echo "Release APK SHA-256 Checksum:"
+          cat PocketKnife.apk.sha256
+
+      - name: Publish GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            PocketKnife.apk
+            PocketKnife.apk.sha256
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+
+      - name: Update Manifest and Push to Main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          CLEAN_VERSION="${TAG_NAME#v}"
+          VERSION_CODE=$(grep '^version:' app/pubspec.yaml | sed -E 's/.*(\+| )([0-9]+).*/\2/')
+          if [ -z "$VERSION_CODE" ]; then VERSION_CODE="1"; fi
+          APK_SHA=$(sha256sum PocketKnife.apk | awk '{print $1}')
+
+          echo "Updating app-update.json: version=$CLEAN_VERSION, versionCode=$VERSION_CODE, sha=$APK_SHA..."
+
+          python3 -c "
+          import json, os
+          with open('app-update.json', 'r') as f:
+              data = json.load(f)
+          data['version'] = '$CLEAN_VERSION'
+          data['versionCode'] = int('$VERSION_CODE')
+          data['apkUrl'] = 'https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/PocketKnife.apk'
+          data['sha256'] = '$APK_SHA'
+          with open('app-update.json', 'w') as f:
+              json.dump(data, f, indent=2)
+              f.write('\n')
+          "
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout main
+          git pull origin main --rebase || true
+          git add app-update.json
+          if git diff --staged --quiet; then
+            echo "Manifest already up to date on main."
+          else
+            git commit -m "chore(release): update app-update.json for ${TAG_NAME} [skip ci]"
+            git push origin main
+          fi

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/store.dart';
+import 'services/update_service.dart';
 import 'theme/app_theme.dart';
 import 'screens/splash_screen.dart';
 
@@ -14,17 +15,29 @@ Future<void> main() async {
     statusBarIconBrightness: Brightness.dark,
   ));
   final prefs = await SharedPreferences.getInstance();
-  runApp(PocketknifeApp(store: AppStore(prefs)));
+  final updateService = UpdateService.instance;
+  await updateService.init();
+
+  runApp(PocketknifeApp(store: AppStore(prefs), updateService: updateService));
 }
 
 class PocketknifeApp extends StatelessWidget {
   final AppStore store;
-  const PocketknifeApp({super.key, required this.store});
+  final UpdateService updateService;
+
+  const PocketknifeApp({
+    super.key,
+    required this.store,
+    required this.updateService,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider.value(
-      value: store,
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: store),
+        ChangeNotifierProvider.value(value: updateService),
+      ],
       child: MaterialApp(
         title: 'Pocketknife',
         debugShowCheckedModeBanner: false,

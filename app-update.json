@@ -1,0 +1,9 @@
+{
+  "version": "1.0.0",
+  "versionCode": 1,
+  "releaseNotes": "Initial release of Pocketknife with offline document & image tools.",
+  "apkUrl": "https://github.com/shadowmodex/pocketknife/releases/latest/download/PocketKnife.apk",
+  "minimumSupportedVersion": "1.0.0",
+  "sha256": null
+}
+

@@ -181,3 +181,80 @@ sequenceDiagram
    - Rebuilds PDF document embedding the compressed image pages.
 3. **Storage:** Saved via `FileSaver.instance.saveDocument()`.
 4. **UI Feedback:** Displays percentage reduction (e.g., "42% smaller").
+
+---
+
+## 7. In-App Update System
+
+### 7.1 Overview & Entry Point
+- **Screen:** [`SettingsScreen`](file:///d:/Pocketknife/app/lib/screens/settings_screen.dart) (`_UpdateCard`)
+- **Service:** [`UpdateService`](file:///d:/Pocketknife/app/lib/services/update_service.dart)
+- **Model:** [`UpdateManifest`](file:///d:/Pocketknife/app/lib/models/update_info.dart) & [`AppVersion`](file:///d:/Pocketknife/app/lib/models/update_info.dart)
+- **Purpose:** Automatically detects, securely downloads, verifies, and installs new application releases from GitHub.
+
+### 7.2 Execution Order & Call Trace
+1. **Check for Updates:**
+   - User navigates to Settings and taps "Check for Updates" (or "Check Again").
+   - `UpdateService.instance.checkForUpdates()` initiates HTTPS GET to `https://raw.githubusercontent.com/shadowmodex/pocketknife/master/app-update.json`.
+   - Manifest JSON is decoded and validated via `UpdateManifest.fromJsonString()`.
+   - `manifest.appVersion.isNewerThan(currentVersion)` compares semantic versions (`major.minor.patch`) and build numbers (`versionCode`).
+   - If a newer version exists, status transitions to `UpdateStatus.updateAvailable`.
+   - If current version is equal or newer, transitions to `UpdateStatus.upToDate`.
+2. **Download Update:**
+   - User reviews version badge, download size, and release notes, then taps "Download Update".
+   - `UpdateService.instance.downloadUpdate()` validates that `apkUrl` is HTTPS on a trusted GitHub domain (`github.com`, `objects.githubusercontent.com`).
+   - Streams bytes chunk-by-chunk to `pocketknife_updates/update_<versionCode>.apk.download`.
+   - Computes running SHA-256 hash using `crypto.sha256.startChunkedConversion()`.
+   - Emits real-time progress (`downloadProgress`, `downloadedBytes`, `totalBytes`) updating the UI progress bar.
+   - When download concludes:
+     - Verifies file size is non-empty (> 1024 bytes).
+     - If manifest supplies `sha256`, validates computed digest against expected digest. If mismatch occurs, deletes file and sets `UpdateStatus.error`.
+     - Renames `.apk.download` atomically to `PocketKnife_<version>.apk`.
+     - Transitions to `UpdateStatus.readyToInstall`.
+3. **Install Update:**
+   - User taps "Install Update".
+   - `UpdateService.instance.installUpdate(context)` checks `Permission.requestInstallPackages.status`.
+   - If not granted, requests permission. If denied, displays an explanatory dialog and directs user to system settings (`openAppSettings()`).
+   - Calls `OpenFilex.open(apkPath, type: 'application/vnd.android.package-archive')`.
+   - Android's native `PackageInstaller` presents the system upgrade dialog for user confirmation.
+
+### 7.3 Sequence Diagram
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as SettingsScreen (_UpdateCard)
+    participant Update as UpdateService
+    participant GH as GitHub (Raw & Releases)
+    participant FS as File System (Updates Cache)
+    participant OS as Android PackageInstaller
+
+    User->>UI: Tap "Check for Updates"
+    UI->>Update: checkForUpdates()
+    Update->>GH: GET /shadowmodex/pocketknife/master/app-update.json
+    GH-->>Update: 200 OK (Manifest JSON)
+    Update->>Update: AppVersion.isNewerThan(current)
+    Update-->>UI: UpdateStatus.updateAvailable (notes, size)
+
+    User->>UI: Tap "Download Update"
+    UI->>Update: downloadUpdate()
+    Update->>GH: GET /releases/download/v1.0.1/PocketKnife.apk
+    GH-->>Update: 302 Redirect to objects.githubusercontent.com
+    Update->>GH: GET /objects.githubusercontent.com/...
+    loop Stream Chunks
+        GH-->>Update: Chunks
+        Update->>FS: Write chunk
+        Update->>Update: Update SHA-256 & progress
+        Update-->>UI: downloadProgress (45%)
+    end
+    Update->>Update: Verify SHA-256 checksum
+    Update->>FS: Rename to PocketKnife_1.0.1.apk
+    Update-->>UI: UpdateStatus.readyToInstall
+
+    User->>UI: Tap "Install Update"
+    UI->>Update: installUpdate(context)
+    Update->>OS: Check REQUEST_INSTALL_PACKAGES
+    Update->>OS: OpenFilex.open(apkPath, application/vnd.android.package-archive)
+    OS-->>User: System Package Installer Dialog
+```
+
+

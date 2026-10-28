@@ -1,0 +1,9 @@
+# PocketKnife Release Signing Configuration Template
+# Copy this file to "key.properties" in this directory (app/android/key.properties).
+# NEVER commit key.properties or .jks files to version control!
+
+storePassword=your_store_password_here
+keyPassword=your_key_password_here
+keyAlias=your_key_alias_here
+storeFile=pocketknife-release.jks
+

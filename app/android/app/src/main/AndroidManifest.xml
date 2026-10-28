@@ -7,6 +7,11 @@
         android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
 
+    <!-- Required for checking and downloading in-app updates from GitHub Releases -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Required on Android 8+ for opening package installer when user approves update -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+
     <application
         android:label="Pocketknife"
         android:name="${applicationName}"
