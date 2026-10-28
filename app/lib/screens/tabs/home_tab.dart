@@ -1,149 +1,188 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../../models/models.dart';
-import '../../services/file_saver.dart';
-import '../../services/store.dart';
-import '../../util.dart';
+import '../../theme/app_colors.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/cards.dart';
 import '../../widgets/logo.dart';
 import '../../widgets/scaffold.dart';
-import '../video_screen.dart';
-import '../mp3_screen.dart';
-import '../photo_screen.dart';
 import '../docs_screen.dart';
+import '../photo_screen.dart';
+import '../settings_screen.dart';
+import '../docs/merge_pdf_screen.dart';
+import '../docs/word_to_pdf_screen.dart';
+import '../docs/text_to_pdf_screen.dart';
+import '../docs/split_pdf_screen.dart';
+import '../docs/compress_pdf_screen.dart';
 
 class HomeTab extends StatelessWidget {
   const HomeTab({super.key});
 
   void _openTool(BuildContext context, ToolKind kind) {
     final Widget page = switch (kind) {
-      ToolKind.video => const VideoScreen(),
-      ToolKind.mp3 => const Mp3Screen(),
-      ToolKind.photo => const PhotoScreen(),
-      ToolKind.docs => const DocsScreen(),
+      ToolKind.mergePdf => const MergePdfScreen(),
+      ToolKind.imageConverter => const PhotoScreen(),
+      ToolKind.wordToPdf => const WordToPdfScreen(),
+      ToolKind.textToPdf => const TextToPdfScreen(),
+      ToolKind.splitPdf => const SplitPdfScreen(),
+      ToolKind.compressPdf => const CompressPdfScreen(),
     };
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
   @override
   Widget build(BuildContext context) {
-    final store = context.watch<AppStore>();
-    final activeJobs =
-        store.jobs.where((j) => j.status == JobStatus.running || j.status == JobStatus.failed).toList();
-    final recent = store.activity.take(4).toList();
-
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Top App Header
           Row(
             children: [
-              const BrandLogo(size: 44),
+              const BrandLogo(size: 42),
               const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Pocketknife', style: Theme.of(context).textTheme.headlineSmall),
-                  Text('Simple. Fast. Private.',
-                      style: Theme.of(context).textTheme.bodySmall),
-                ],
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Pocketknife',
+                      style: TextStyle(
+                        fontFamily: AppTheme.fontFamily,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.ink,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Your everyday file tools',
+                      style: TextStyle(
+                        fontFamily: AppTheme.fontFamily,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w400,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              CircleIconButton(
+                icon: Icons.settings_outlined,
+                size: 38,
+                iconSize: 20,
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  );
+                },
               ),
             ],
           ),
+          const SizedBox(height: 18),
+
+          // Hero Banner (Blue card with 3D folder art)
+          const HeroBanner(),
           const SizedBox(height: 22),
-          _ToolGrid(onTap: (k) => _openTool(context, k)),
-          if (activeJobs.isNotEmpty) ...[
-            const SizedBox(height: 26),
-            const SectionHeader('Downloads'),
-            for (final job in activeJobs)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: JobCard(
-                  icon: job.kind.icon,
-                  color: job.kind.color,
-                  bg: job.kind.tileBg,
-                  title: job.title,
-                  subtitle: job.subtitle,
-                  progress: job.progress,
-                  running: job.status == JobStatus.running,
-                  failed: job.status == JobStatus.failed,
-                  completed: false,
-                  onDismiss: () => store.removeJob(job),
+
+          // "All Tools" Section Header with "See All ->"
+          Row(
+            children: [
+              const Text(
+                'All Tools',
+                style: TextStyle(
+                  fontFamily: AppTheme.fontFamily,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.ink,
+                  letterSpacing: -0.2,
                 ),
               ),
-          ],
-          const SizedBox(height: 26),
-          SectionHeader(
-            'Recent activity',
-            trailing: recent.isEmpty
-                ? null
-                : Text('Last ${recent.length}',
-                    style: Theme.of(context).textTheme.labelSmall),
+              const Spacer(),
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const DocsScreen()),
+                  );
+                },
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: Row(
+                    children: [
+                      Text(
+                        'See All',
+                        style: TextStyle(
+                          fontFamily: AppTheme.fontFamily,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      SizedBox(width: 4),
+                      Icon(Icons.arrow_forward_rounded, size: 15, color: AppColors.primary),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-          if (recent.isEmpty)
-            const EmptyState(
-              icon: Icons.bolt_rounded,
-              title: 'Nothing yet',
-              message: 'Your converted files and downloads will show up here.',
-            )
-          else
-            PkCard(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              child: Column(
-                children: [
-                  for (var i = 0; i < recent.length; i++) ...[
-                    if (i > 0) const Divider(height: 1),
-                    ActivityRow(
-                      icon: recent[i].kind.icon,
-                      color: recent[i].kind.color,
-                      bg: recent[i].kind.tileBg,
-                      title: recent[i].name,
-                      meta: recent[i].meta,
-                      time: timeAgo(recent[i].at),
-                      onTap: recent[i].savedPath == null
-                          ? null
-                          : () => FileSaver.instance.open(recent[i].savedPath!),
+          const SizedBox(height: 14),
+
+          // 2-Column Grid of 6 Tools matching Image 1
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Left Column: Merge PDF, Word to PDF, Split PDF
+              Expanded(
+                child: Column(
+                  children: [
+                    ToolCard(
+                      kind: ToolKind.mergePdf,
+                      onTap: () => _openTool(context, ToolKind.mergePdf),
+                    ),
+                    const SizedBox(height: 12),
+                    ToolCard(
+                      kind: ToolKind.wordToPdf,
+                      onTap: () => _openTool(context, ToolKind.wordToPdf),
+                    ),
+                    const SizedBox(height: 12),
+                    ToolCard(
+                      kind: ToolKind.splitPdf,
+                      onTap: () => _openTool(context, ToolKind.splitPdf),
                     ),
                   ],
-                ],
+                ),
               ),
-            ),
+              const SizedBox(width: 12),
+              // Right Column: Image Converter, Text to PDF, Compress PDF
+              Expanded(
+                child: Column(
+                  children: [
+                    ToolCard(
+                      kind: ToolKind.imageConverter,
+                      onTap: () => _openTool(context, ToolKind.imageConverter),
+                    ),
+                    const SizedBox(height: 12),
+                    ToolCard(
+                      kind: ToolKind.textToPdf,
+                      onTap: () => _openTool(context, ToolKind.textToPdf),
+                    ),
+                    const SizedBox(height: 12),
+                    ToolCard(
+                      kind: ToolKind.compressPdf,
+                      onTap: () => _openTool(context, ToolKind.compressPdf),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
       ),
-    );
-  }
-}
-
-class _ToolGrid extends StatelessWidget {
-  final ValueChanged<ToolKind> onTap;
-  const _ToolGrid({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    Widget cell(ToolKind k) => ToolCard(
-          icon: k.icon,
-          color: k.color,
-          bg: k.tileBg,
-          title: k.title,
-          blurb: k.blurb.replaceAll('\n', ' '),
-          onTap: () => onTap(k),
-        );
-    return Column(
-      children: [
-        Row(children: [
-          Expanded(child: cell(ToolKind.video)),
-          const SizedBox(width: 14),
-          Expanded(child: cell(ToolKind.mp3)),
-        ]),
-        const SizedBox(height: 14),
-        Row(children: [
-          Expanded(child: cell(ToolKind.photo)),
-          const SizedBox(width: 14),
-          Expanded(child: cell(ToolKind.docs)),
-        ]),
-      ],
     );
   }
 }

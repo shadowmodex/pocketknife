@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -41,6 +40,44 @@ class FileSaver {
     final d = Directory('${base.path}/Pocketknife');
     if (!await d.exists()) await d.create(recursive: true);
     return d;
+  }
+
+  /// Public accessor for the files storage directory.
+  Future<Directory> getSavedFilesDir() => _appOut();
+
+  /// Retrieve all locally saved files ordered by last modified (newest first).
+  Future<List<File>> listSavedFiles() async {
+    try {
+      final dir = await _appOut();
+      if (!await dir.exists()) return [];
+      final entries = await dir.list().toList();
+      final files = entries.whereType<File>().toList();
+      files.sort((a, b) {
+        try {
+          return b.lastModifiedSync().compareTo(a.lastModifiedSync());
+        } catch (_) {
+          return 0;
+        }
+      });
+      return files;
+    } catch (e) {
+      if (kDebugMode) debugPrint('Error listing saved files: $e');
+      return [];
+    }
+  }
+
+  /// Delete a saved file.
+  Future<bool> deleteFile(String path) async {
+    try {
+      final f = File(path);
+      if (await f.exists()) {
+        await f.delete();
+        return true;
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('Error deleting file: $e');
+    }
+    return false;
   }
 
   Future<void> _ensureLegacyPermission() async {

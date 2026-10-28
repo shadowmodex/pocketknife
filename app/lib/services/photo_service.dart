@@ -2,7 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image/image.dart' as img;
 
-enum PicFormat { jpeg, png, webp, bmp }
+enum PicFormat { jpeg, png, webp, bmp, gif }
 
 extension PicFormatMeta on PicFormat {
   String get ext {
@@ -15,6 +15,8 @@ extension PicFormatMeta on PicFormat {
         return 'webp';
       case PicFormat.bmp:
         return 'bmp';
+      case PicFormat.gif:
+        return 'gif';
     }
   }
 
@@ -31,6 +33,8 @@ extension PicFormatMeta on PicFormat {
         return PicFormat.webp;
       case 'bmp':
         return PicFormat.bmp;
+      case 'gif':
+        return PicFormat.gif;
       default:
         return PicFormat.jpeg;
     }
@@ -69,8 +73,8 @@ class ProcessedImage {
   int get sizeBytes => bytes.length;
 }
 
-/// Pure-Dart + native image processing that mirrors the extension's Photo
-/// Resizer: resize/convert plus optional "reduce to target size".
+/// Pure-Dart + native image processing: resize/convert plus optional
+/// "reduce to target size". Runs 100% offline.
 class PhotoService {
   PhotoService._();
   static final PhotoService instance = PhotoService._();
@@ -105,6 +109,7 @@ class PhotoService {
         }
         return img.copyResize(src, height: m, interpolation: img.Interpolation.average);
       case ResizeMode.exact:
+        if (o.width == null && o.height == null) return src;
         return img.copyResize(
           src,
           width: o.width,
@@ -117,14 +122,16 @@ class PhotoService {
   Future<Uint8List> _encode(img.Image im, PicFormat fmt, int q) async {
     switch (fmt) {
       case PicFormat.jpeg:
-        return img.encodeJpg(im, quality: q);
+        return Uint8List.fromList(img.encodeJpg(im, quality: q));
       case PicFormat.png:
-        return img.encodePng(im);
+        return Uint8List.fromList(img.encodePng(im));
       case PicFormat.bmp:
-        return img.encodeBmp(im);
+        return Uint8List.fromList(img.encodeBmp(im));
+      case PicFormat.gif:
+        return Uint8List.fromList(img.encodeGif(im));
       case PicFormat.webp:
-        // image pkg can't encode WEBP — hand the raw (lossless PNG) bytes to
-        // the native compressor and let it produce WEBP at the wanted quality.
+        // image pkg can't encode WEBP — hand the raw PNG bytes to
+        // the native compressor to produce WebP at the desired quality.
         final png = img.encodePng(im);
         final result = await FlutterImageCompress.compressWithList(
           png,
@@ -161,7 +168,7 @@ class PhotoService {
     return best;
   }
 
-  /// Quick metadata read for the preview card.
+  /// Quick metadata read for preview cards.
   ({int width, int height})? probe(Uint8List input) {
     final d = img.decodeImage(input);
     if (d == null) return null;

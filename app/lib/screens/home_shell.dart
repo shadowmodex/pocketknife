@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import 'tabs/home_tab.dart';
+import 'tabs/files_tab.dart';
 import 'tabs/activity_tab.dart';
-import 'tabs/settings_tab.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -17,11 +17,16 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.background,
       body: SafeArea(
         bottom: false,
         child: IndexedStack(
           index: _index,
-          children: const [HomeTab(), ActivityTab(), SettingsTab()],
+          children: const [
+            HomeTab(),
+            FilesTab(),
+            ActivityTab(),
+          ],
         ),
       ),
       bottomNavigationBar: _BottomBar(
@@ -38,9 +43,9 @@ class _BottomBar extends StatelessWidget {
   const _BottomBar({required this.index, required this.onTap});
 
   static const _items = [
-    (icon: Icons.grid_view_rounded, label: 'Home'),
-    (icon: Icons.history_rounded, label: 'Activity'),
-    (icon: Icons.settings_rounded, label: 'Settings'),
+    (activeIcon: Icons.home_rounded, inactiveIcon: Icons.home_outlined, label: 'Home'),
+    (activeIcon: Icons.folder_rounded, inactiveIcon: Icons.folder_outlined, label: 'Files'),
+    (activeIcon: Icons.access_time_filled_rounded, inactiveIcon: Icons.access_time_rounded, label: 'History'),
   ];
 
   @override
@@ -53,7 +58,7 @@ class _BottomBar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 62,
+          height: 64,
           child: Row(
             children: [
               for (var i = 0; i < _items.length; i++)
@@ -63,17 +68,30 @@ class _BottomBar extends StatelessWidget {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(_items[i].icon,
-                            size: 23,
-                            color: i == index ? AppColors.accent : AppColors.faint),
-                        const SizedBox(height: 4),
+                        Icon(
+                          i == index ? _items[i].activeIcon : _items[i].inactiveIcon,
+                          size: 24,
+                          color: i == index ? AppColors.primary : AppColors.muted,
+                        ),
+                        const SizedBox(height: 3),
                         Text(
                           _items[i].label,
                           style: TextStyle(
                             fontFamily: AppTheme.fontFamily,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: i == index ? AppColors.accent : AppColors.faint,
+                            fontSize: 11.5,
+                            fontWeight: i == index ? FontWeight.w700 : FontWeight.w500,
+                            color: i == index ? AppColors.primary : AppColors.muted,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        // Active indicator line matching Image 1
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          width: i == index ? 22 : 0,
+                          height: 2.5,
+                          decoration: BoxDecoration(
+                            color: i == index ? AppColors.primary : Colors.transparent,
+                            borderRadius: BorderRadius.circular(2),
                           ),
                         ),
                       ],

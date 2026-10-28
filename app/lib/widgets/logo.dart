@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 
-/// Pocketknife brand mark — a deep-navy rounded tile with a stylised blade.
-/// Painted so it works fully offline with no image asset.
+/// Pocketknife brand mark — dark navy rounded tile with a stylised pocketknife blade
+/// and royal blue pivot accent dot, matching the design in the reference images.
 class BrandLogo extends StatelessWidget {
   final double size;
-  const BrandLogo({super.key, this.size = 84});
+  const BrandLogo({super.key, this.size = 40});
 
   @override
   Widget build(BuildContext context) {
@@ -14,17 +14,13 @@ class BrandLogo extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF1E2E4A), AppColors.primary],
-        ),
+        color: const Color(0xFF0F172A),
         borderRadius: BorderRadius.circular(radius),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.32),
-            blurRadius: size * 0.28,
-            offset: Offset(0, size * 0.12),
+            color: const Color(0xFF0F172A).withValues(alpha: 0.18),
+            blurRadius: size * 0.25,
+            offset: Offset(0, size * 0.08),
           ),
         ],
       ),
@@ -37,30 +33,30 @@ class _BladePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
-    final pivot = Offset(w * 0.30, h * 0.70);
+    final pivot = Offset(w * 0.32, h * 0.68);
 
-    // Blade — a leaf shape from the pivot up to the top-right.
+    // Main blade leaf
     final blade = Path()
       ..moveTo(pivot.dx, pivot.dy)
-      ..quadraticBezierTo(w * 0.42, h * 0.20, w * 0.76, h * 0.26)
-      ..quadraticBezierTo(w * 0.60, h * 0.44, pivot.dx, pivot.dy)
+      ..quadraticBezierTo(w * 0.40, h * 0.24, w * 0.76, h * 0.26)
+      ..quadraticBezierTo(w * 0.62, h * 0.50, pivot.dx, pivot.dy)
       ..close();
     canvas.drawPath(blade, Paint()..color = Colors.white);
 
-    // Accent spine along the blade's edge.
+    // Accent spine along blade edge
     final spine = Paint()
-      ..color = AppColors.accent
+      ..color = AppColors.primary
       ..style = PaintingStyle.stroke
-      ..strokeWidth = w * 0.045
+      ..strokeWidth = w * 0.05
       ..strokeCap = StrokeCap.round;
     final spinePath = Path()
       ..moveTo(pivot.dx, pivot.dy)
-      ..quadraticBezierTo(w * 0.42, h * 0.20, w * 0.76, h * 0.26);
+      ..quadraticBezierTo(w * 0.40, h * 0.24, w * 0.76, h * 0.26);
     canvas.drawPath(spinePath, spine);
 
-    // Pivot rivet.
-    canvas.drawCircle(pivot, w * 0.07, Paint()..color = AppColors.accent);
-    canvas.drawCircle(pivot, w * 0.028, Paint()..color = Colors.white);
+    // Blue pivot rivet dot
+    canvas.drawCircle(pivot, w * 0.08, Paint()..color = AppColors.primary);
+    canvas.drawCircle(pivot, w * 0.035, Paint()..color = Colors.white);
   }
 
   @override

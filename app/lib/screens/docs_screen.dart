@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import '../models/models.dart';
 import '../theme/app_colors.dart';
 import '../widgets/cards.dart';
 import '../widgets/scaffold.dart';
-import 'docs/text_to_pdf_screen.dart';
-import 'docs/word_to_pdf_screen.dart';
+import 'photo_screen.dart';
 import 'docs/merge_pdf_screen.dart';
+import 'docs/word_to_pdf_screen.dart';
+import 'docs/text_to_pdf_screen.dart';
 import 'docs/split_pdf_screen.dart';
 import 'docs/compress_pdf_screen.dart';
 
@@ -13,66 +15,52 @@ class DocsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tools = <({IconData icon, String title, String sub, Widget page})>[
-      (
-        icon: Icons.post_add_rounded,
-        title: 'Text to PDF',
-        sub: 'Turn notes or text into a clean PDF',
-        page: const TextToPdfScreen(),
-      ),
-      (
-        icon: Icons.description_rounded,
-        title: 'Word to PDF',
-        sub: 'Convert a .docx document to PDF',
-        page: const WordToPdfScreen(),
-      ),
-      (
-        icon: Icons.merge_rounded,
-        title: 'Merge PDFs',
-        sub: 'Combine several PDFs into one',
-        page: const MergePdfScreen(),
-      ),
-      (
-        icon: Icons.call_split_rounded,
-        title: 'Split / extract',
-        sub: 'Pull selected pages into a new PDF',
-        page: const SplitPdfScreen(),
-      ),
-      (
-        icon: Icons.compress_rounded,
-        title: 'Compress PDF',
-        sub: 'Shrink a large PDF to a smaller size',
-        page: const CompressPdfScreen(),
-      ),
+    final tools = <({ToolKind kind, Widget page})>[
+      (kind: ToolKind.mergePdf, page: const MergePdfScreen()),
+      (kind: ToolKind.imageConverter, page: const PhotoScreen()),
+      (kind: ToolKind.wordToPdf, page: const WordToPdfScreen()),
+      (kind: ToolKind.textToPdf, page: const TextToPdfScreen()),
+      (kind: ToolKind.splitPdf, page: const SplitPdfScreen()),
+      (kind: ToolKind.compressPdf, page: const CompressPdfScreen()),
     ];
 
     return AppScaffold(
-      title: 'Docs Toolkit',
-      subtitle: 'PDF & Word tools',
+      title: 'All Tools',
+      subtitle: 'Fast, simple & 100% offline file tools',
       body: Column(
         children: [
           for (var i = 0; i < tools.length; i++)
             Padding(
               padding: EdgeInsets.only(bottom: i == tools.length - 1 ? 0 : 12),
               child: PkCard(
-                onTap: () => Navigator.of(context)
-                    .push(MaterialPageRoute(builder: (_) => tools[i].page)),
-                padding: const EdgeInsets.all(14),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => tools[i].page),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 child: Row(
                   children: [
-                    IconTile(
-                        icon: tools[i].icon,
-                        color: AppColors.toolDocs,
-                        bg: AppColors.toolDocsBg,
-                        size: 44),
+                    ToolIconBadge(kind: tools[i].kind, size: 44),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(tools[i].title, style: Theme.of(context).textTheme.titleMedium),
+                          Text(
+                            tools[i].kind.title,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15.5,
+                              color: AppColors.ink,
+                            ),
+                          ),
                           const SizedBox(height: 2),
-                          Text(tools[i].sub, style: Theme.of(context).textTheme.bodySmall),
+                          Text(
+                            tools[i].kind.blurb,
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              color: AppColors.muted,
+                            ),
+                          ),
                         ],
                       ),
                     ),
