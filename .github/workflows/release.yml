@@ -101,29 +101,38 @@ jobs:
         run: |
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           CLEAN_VERSION="${TAG_NAME#v}"
-          VERSION_CODE=$(grep '^version:' app/pubspec.yaml | sed -E 's/.*(\+| )([0-9]+).*/\2/')
-          if [ -z "$VERSION_CODE" ]; then VERSION_CODE="1"; fi
           APK_SHA=$(sha256sum PocketKnife.apk | awk '{print $1}')
+          APK_SIZE=$(python3 -c "import os; print(os.path.getsize('PocketKnife.apk'))")
 
-          echo "Updating app-update.json: version=$CLEAN_VERSION, versionCode=$VERSION_CODE, sha=$APK_SHA..."
+          # Checkout main branch first before writing manifest to avoid local modification conflict during checkout
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B main origin/main
+
+          echo "Updating app-update.json: version=$CLEAN_VERSION, sha=$APK_SHA, size=$APK_SIZE..."
 
           python3 -c "
-          import json, os
+          import json, re
+
+          with open('app/pubspec.yaml', 'r') as f:
+              pubspec = f.read()
+          m = re.search(r'^version:\s*([^+]+)\+?([0-9]*)', pubspec, re.MULTILINE)
+          vcode = int(m.group(2)) if m and m.group(2) else 1
+
           with open('app-update.json', 'r') as f:
               data = json.load(f)
+
           data['version'] = '$CLEAN_VERSION'
-          data['versionCode'] = int('$VERSION_CODE')
+          data['versionCode'] = vcode
           data['apkUrl'] = 'https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/PocketKnife.apk'
           data['sha256'] = '$APK_SHA'
+          data['fileSizeBytes'] = int('$APK_SIZE')
+
           with open('app-update.json', 'w') as f:
               json.dump(data, f, indent=2)
               f.write('\n')
           "
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout main
-          git pull origin main --rebase || true
           git add app-update.json
           if git diff --staged --quiet; then
             echo "Manifest already up to date on main."
