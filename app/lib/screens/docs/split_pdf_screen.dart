@@ -76,7 +76,7 @@ class _SplitPdfScreenState extends State<SplitPdfScreen> {
       final saved = await FileSaver.instance.saveDocument(bytes, fileName);
       if (!mounted) return;
       context.read<AppStore>().addActivity(
-            ToolKind.docs,
+            ToolKind.splitPdf,
             fileName,
             '${pages.length} pages • ${humanSize(bytes.length)}',
             savedPath: saved.path,

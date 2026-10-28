@@ -60,20 +60,6 @@ dependencies:
   archive: ^3.6.1
   xml: ^6.5.0
 
-  # Video / audio download
-  youtube_explode_dart: ^2.3.9
-  dio: ^5.7.0
-  # Already pulled in transitively by youtube_explode_dart; declared explicitly
-  # so we can import ClientException to classify stream-download failures.
-  http: ^1.6.0
-
-  # Media engine: FFmpeg for genuine MP3 (libmp3lame) encoding and for muxing
-  # separate video+audio streams into a playable MP4. Uses the actively
-  # maintained antonkarpenko fork (FFmpeg 6.0 LTS, LGPL-3.0, minSdk 24). The
-  # "audio" flavour bundles libmp3lame plus the core muxers we need and omits
-  # the heavy GPL video encoders (x264/x265) we don't.
-  ffmpeg_kit_flutter_new_audio: ^2.5.2
-
 dev_dependencies:
   flutter_test:
     sdk: flutter

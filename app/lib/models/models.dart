@@ -1,89 +1,132 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 
-/// The four tools, in the order shown on Home.
-enum ToolKind { video, mp3, photo, docs }
+/// The 6 core file tools shown on Home.
+enum ToolKind {
+  mergePdf,
+  imageConverter,
+  wordToPdf,
+  textToPdf,
+  splitPdf,
+  compressPdf,
+}
 
 extension ToolKindMeta on ToolKind {
   String get id => name;
 
   IconData get icon {
     switch (this) {
-      case ToolKind.video:
-        return Icons.play_circle_fill_rounded;
-      case ToolKind.mp3:
-        return Icons.music_note_rounded;
-      case ToolKind.photo:
+      case ToolKind.mergePdf:
+        return Icons.picture_as_pdf_rounded;
+      case ToolKind.imageConverter:
         return Icons.image_rounded;
-      case ToolKind.docs:
+      case ToolKind.wordToPdf:
         return Icons.description_rounded;
+      case ToolKind.textToPdf:
+        return Icons.article_rounded;
+      case ToolKind.splitPdf:
+        return Icons.call_split_rounded;
+      case ToolKind.compressPdf:
+        return Icons.compress_rounded;
     }
   }
 
   Color get color {
     switch (this) {
-      case ToolKind.video:
-        return AppColors.toolVideo;
-      case ToolKind.mp3:
-        return AppColors.toolMp3;
-      case ToolKind.photo:
-        return AppColors.toolPhoto;
-      case ToolKind.docs:
-        return AppColors.toolDocs;
+      case ToolKind.mergePdf:
+        return AppColors.toolMergePdf;
+      case ToolKind.imageConverter:
+        return AppColors.toolImage;
+      case ToolKind.wordToPdf:
+        return AppColors.toolWord;
+      case ToolKind.textToPdf:
+        return AppColors.toolText;
+      case ToolKind.splitPdf:
+        return AppColors.toolSplit;
+      case ToolKind.compressPdf:
+        return AppColors.toolCompress;
     }
   }
 
   Color get tileBg {
     switch (this) {
-      case ToolKind.video:
-        return AppColors.toolVideoBg;
-      case ToolKind.mp3:
-        return AppColors.toolMp3Bg;
-      case ToolKind.photo:
-        return AppColors.toolPhotoBg;
-      case ToolKind.docs:
-        return AppColors.toolDocsBg;
+      case ToolKind.mergePdf:
+        return AppColors.toolMergePdfBg;
+      case ToolKind.imageConverter:
+        return AppColors.toolImageBg;
+      case ToolKind.wordToPdf:
+        return AppColors.toolWordBg;
+      case ToolKind.textToPdf:
+        return AppColors.toolTextBg;
+      case ToolKind.splitPdf:
+        return AppColors.toolSplitBg;
+      case ToolKind.compressPdf:
+        return AppColors.toolCompressBg;
     }
   }
 
   String get title {
     switch (this) {
-      case ToolKind.video:
-        return 'Video Downloader';
-      case ToolKind.mp3:
-        return 'Clip2MP3';
-      case ToolKind.photo:
-        return 'Photo Resizer';
-      case ToolKind.docs:
-        return 'Docs Toolkit';
+      case ToolKind.mergePdf:
+        return 'Merge PDF';
+      case ToolKind.imageConverter:
+        return 'Image Converter';
+      case ToolKind.wordToPdf:
+        return 'Word to PDF';
+      case ToolKind.textToPdf:
+        return 'Text to PDF';
+      case ToolKind.splitPdf:
+        return 'Split PDF';
+      case ToolKind.compressPdf:
+        return 'Compress PDF';
     }
   }
 
   String get blurb {
     switch (this) {
-      case ToolKind.video:
-        return 'YouTube, Shorts,\nInstagram & more';
-      case ToolKind.mp3:
-        return 'YouTube to MP3\nHigh quality audio';
-      case ToolKind.photo:
-        return 'Resize, convert\nand reduce size';
-      case ToolKind.docs:
-        return 'PDF, Word and more\nMerge, split, convert';
+      case ToolKind.mergePdf:
+        return 'Combine multiple PDF files';
+      case ToolKind.imageConverter:
+        return 'Convert images to JPG, PNG, WebP etc.';
+      case ToolKind.wordToPdf:
+        return 'Convert DOC/DOCX to PDF';
+      case ToolKind.textToPdf:
+        return 'Convert text or notes to PDF';
+      case ToolKind.splitPdf:
+        return 'Split PDF into multiple files';
+      case ToolKind.compressPdf:
+        return 'Reduce file size easily';
     }
   }
 
-  String get route => '/$name';
-
-  static ToolKind fromId(String id) =>
-      ToolKind.values.firstWhere((t) => t.name == id, orElse: () => ToolKind.photo);
+  static ToolKind fromId(String id) {
+    switch (id) {
+      case 'mergePdf':
+      case 'docs':
+        return ToolKind.mergePdf;
+      case 'imageConverter':
+      case 'photo':
+        return ToolKind.imageConverter;
+      case 'wordToPdf':
+        return ToolKind.wordToPdf;
+      case 'textToPdf':
+        return ToolKind.textToPdf;
+      case 'splitPdf':
+        return ToolKind.splitPdf;
+      case 'compressPdf':
+        return ToolKind.compressPdf;
+      default:
+        return ToolKind.mergePdf;
+    }
+  }
 }
 
-/// A completed piece of work, shown in Recent Activity and the Activity tab.
+/// A completed piece of work, shown in Recent Activity and the History tab.
 class ActivityItem {
   final String id;
   final ToolKind kind;
-  final String name; // file name, e.g. song.mp3
-  final String meta; // e.g. "320 kbps • 8.4 MB"
+  final String name; // file name, e.g. document.pdf
+  final String meta; // e.g. "4 pages • 1.2 MB"
   final String? savedPath;
   final DateTime at;
 
@@ -113,32 +156,4 @@ class ActivityItem {
         savedPath: j['savedPath'] as String?,
         at: DateTime.fromMillisecondsSinceEpoch(j['at'] as int),
       );
-}
-
-enum JobStatus { running, completed, failed, paused }
-
-/// A live download (video / mp3). Rendered with a progress bar; when it finishes
-/// it also becomes an [ActivityItem].
-class DownloadJob {
-  final String id;
-  final ToolKind kind;
-  String title;
-  String subtitle;
-  double progress; // 0..1
-  JobStatus status;
-  String? error;
-  String? savedPath;
-  final DateTime startedAt;
-
-  DownloadJob({
-    required this.id,
-    required this.kind,
-    required this.title,
-    this.subtitle = '',
-    this.progress = 0,
-    this.status = JobStatus.running,
-    this.error,
-    this.savedPath,
-    DateTime? startedAt,
-  }) : startedAt = startedAt ?? DateTime.now();
 }

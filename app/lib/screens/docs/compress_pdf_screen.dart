@@ -65,7 +65,7 @@ class _CompressPdfScreenState extends State<CompressPdfScreen> {
       final saved = await FileSaver.instance.saveDocument(bytes, fileName);
       if (!mounted) return;
       context.read<AppStore>().addActivity(
-            ToolKind.docs,
+            ToolKind.compressPdf,
             fileName,
             'Compressed • ${humanSize(bytes.length)}',
             savedPath: saved.path,

@@ -87,7 +87,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
       final saved = await FileSaver.instance.saveImage(out.bytes, fileName);
       if (!mounted) return;
       context.read<AppStore>().addActivity(
-            ToolKind.photo,
+            ToolKind.imageConverter,
             fileName,
             '${_format.label} • ${out.width}×${out.height} • ${humanSize(out.sizeBytes)}',
             savedPath: saved.path,

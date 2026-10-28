@@ -63,7 +63,7 @@ class _MergePdfScreenState extends State<MergePdfScreen> {
       final saved = await FileSaver.instance.saveDocument(bytes, fileName);
       if (!mounted) return;
       context.read<AppStore>().addActivity(
-            ToolKind.docs,
+            ToolKind.mergePdf,
             fileName,
             'Merged ${_files.length} PDFs • ${humanSize(bytes.length)}',
             savedPath: saved.path,

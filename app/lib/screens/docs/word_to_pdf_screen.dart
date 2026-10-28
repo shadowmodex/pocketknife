@@ -57,7 +57,7 @@ class _WordToPdfScreenState extends State<WordToPdfScreen> {
       final saved = await FileSaver.instance.saveDocument(bytes, fileName);
       if (!mounted) return;
       context.read<AppStore>().addActivity(
-            ToolKind.docs,
+            ToolKind.wordToPdf,
             fileName,
             'Word to PDF • ${humanSize(bytes.length)}',
             savedPath: saved.path,

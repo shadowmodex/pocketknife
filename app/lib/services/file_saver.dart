@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -16,19 +17,17 @@ class SavedFile {
   String get prettyLocation => inGallery ? 'Saved to your device' : 'Saved in app storage';
 }
 
-/// Handles persisting generated files. Media (images/video/audio) go to the
-/// gallery; documents go to a public Pocketknife folder when possible, and
+/// Handles persisting generated files. Images go to the gallery;
+/// documents go to a public Pocketknife folder when possible, and
 /// always to app storage as a reliable fallback that Share/Open can use.
 class FileSaver {
   FileSaver._();
   static final FileSaver instance = FileSaver._();
 
   static const _albumImages = 'Pocketknife';
-  static const _relVideos = 'Movies/Pocketknife';
-  static const _relAudio = 'Music/Pocketknife';
   static const _relDocs = 'Download/Pocketknife';
 
-  /// A private scratch directory for intermediate work (temp downloads etc.).
+  /// A private scratch directory for intermediate work.
   Future<Directory> workDir() async {
     final base = await getTemporaryDirectory();
     final d = Directory('${base.path}/pocketknife');
@@ -73,31 +72,6 @@ class FileSaver {
     return SavedFile(name: name, path: local.path, inGallery: inGallery);
   }
 
-  Future<SavedFile> saveVideo(String tempPath, String name) =>
-      _saveMedia(tempPath, name, _relVideos);
-
-  Future<SavedFile> saveAudio(String tempPath, String name) =>
-      _saveMedia(tempPath, name, _relAudio);
-
-  Future<SavedFile> _saveMedia(String tempPath, String name, String relPath) async {
-    // Move a copy to app storage as the durable fallback.
-    final local = await _copyLocal(tempPath, name);
-    var inGallery = false;
-    try {
-      await _ensureLegacyPermission();
-      final res = await SaverGallery.saveFile(
-        filePath: tempPath,
-        fileName: name,
-        skipIfExists: false,
-        androidRelativePath: relPath,
-      );
-      inGallery = res.isSuccess;
-    } catch (e) {
-      if (kDebugMode) debugPrint('saveMedia gallery failed: $e');
-    }
-    return SavedFile(name: name, path: local.path, inGallery: inGallery);
-  }
-
   /// Documents (PDF/DOCX/etc.). Tries the public Download/Pocketknife folder,
   /// always keeps an app-storage copy.
   Future<SavedFile> saveDocument(Uint8List bytes, String name) async {
@@ -125,13 +99,6 @@ class FileSaver {
     final f = File('${dir.path}/$name');
     await f.writeAsBytes(bytes, flush: true);
     return f;
-  }
-
-  Future<File> _copyLocal(String tempPath, String name) async {
-    final dir = await _appOut();
-    final dest = File('${dir.path}/$name');
-    await File(tempPath).copy(dest.path);
-    return dest;
   }
 
   Future<void> open(String path) async {

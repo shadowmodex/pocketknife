@@ -45,7 +45,7 @@ class _TextToPdfScreenState extends State<TextToPdfScreen> {
       final saved = await FileSaver.instance.saveDocument(bytes, fileName);
       if (!mounted) return;
       context.read<AppStore>().addActivity(
-            ToolKind.docs,
+            ToolKind.textToPdf,
             fileName,
             'Text to PDF • ${humanSize(bytes.length)}',
             savedPath: saved.path,
