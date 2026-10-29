@@ -45,9 +45,16 @@ class _PhotoScreenState extends State<PhotoScreen> {
   // Batch images state
   final List<_ImageItem> _batchImages = [];
 
-  // Conversion options matching Image 3
+  // Conversion options
   String _selectedFormat = 'JPG'; // 'JPG', 'PNG', 'WebP', 'JPEG', 'GIF'
-  int _quality = 100;
+  int _quality = 90;
+
+  // Target File Size state
+  bool _enableTargetSize = false;
+  final TextEditingController _targetSizeCtrl = TextEditingController(text: '500');
+  String _targetUnit = 'KB'; // 'KB' or 'MB'
+
+  // Exact Pixel Resize state (NO percentage slider)
   bool _enableResize = false;
   bool _keepAspectRatio = true;
   final TextEditingController _widthCtrl = TextEditingController();
@@ -56,11 +63,13 @@ class _PhotoScreenState extends State<PhotoScreen> {
   bool _busy = false;
   double _batchProgress = 0.0;
   SavedFile? _lastSaved;
-  int _lastResultSize = 0;
-  List<SavedFile> _batchSaved = [];
+  ProcessedImage? _lastProcessed;
+  final List<SavedFile> _batchSaved = [];
+  final List<ProcessedImage> _batchProcessed = [];
 
   @override
   void dispose() {
+    _targetSizeCtrl.dispose();
     _widthCtrl.dispose();
     _heightCtrl.dispose();
     super.dispose();
@@ -79,6 +88,17 @@ class _PhotoScreenState extends State<PhotoScreen> {
       default:
         return PicFormat.jpeg;
     }
+  }
+
+  int? get _targetSizeBytes {
+    if (!_enableTargetSize) return null;
+    final text = _targetSizeCtrl.text.trim();
+    final value = double.tryParse(text);
+    if (value == null || value <= 0) return null;
+    if (_targetUnit == 'MB') {
+      return (value * 1024 * 1024).round();
+    }
+    return (value * 1024).round();
   }
 
   Future<void> _pickSingle() async {
@@ -101,6 +121,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
       _widthCtrl.text = w > 0 ? '$w' : '';
       _heightCtrl.text = h > 0 ? '$h' : '';
       _lastSaved = null;
+      _lastProcessed = null;
     });
   }
 
@@ -130,6 +151,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
     setState(() {
       _batchImages.addAll(items);
       _batchSaved.clear();
+      _batchProcessed.clear();
     });
   }
 
@@ -153,11 +175,20 @@ class _PhotoScreenState extends State<PhotoScreen> {
     }
   }
 
+  void _applyTargetPreset(double value, String unit) {
+    setState(() {
+      _enableTargetSize = true;
+      _targetUnit = unit;
+      _targetSizeCtrl.text = value == value.roundToDouble() ? '${value.toInt()}' : '$value';
+    });
+  }
+
   Future<void> _convertSingle() async {
     if (_singleImage == null) return;
     setState(() {
       _busy = true;
       _lastSaved = null;
+      _lastProcessed = null;
     });
 
     try {
@@ -171,6 +202,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
         resize: resizeMode,
         width: reqWidth,
         height: reqHeight,
+        targetSizeBytes: _targetSizeBytes,
       );
 
       final out = await PhotoService.instance.process(_singleImage!.bytes, opts);
@@ -181,16 +213,17 @@ class _PhotoScreenState extends State<PhotoScreen> {
       final saved = await FileSaver.instance.saveImage(out.bytes, fileName);
       if (!mounted) return;
 
+      final targetStr = _targetSizeBytes != null ? ' • Target: ${humanSize(_targetSizeBytes!)}' : '';
       context.read<AppStore>().addActivity(
             ToolKind.imageConverter,
             fileName,
-            '${_selectedFormat.toUpperCase()} • ${out.width}×${out.height} • ${humanSize(out.sizeBytes)}',
+            '${_selectedFormat.toUpperCase()} • ${out.width}×${out.height} • ${humanSize(out.sizeBytes)}$targetStr',
             savedPath: saved.path,
           );
 
       setState(() {
         _lastSaved = saved;
-        _lastResultSize = out.sizeBytes;
+        _lastProcessed = out;
       });
     } catch (e) {
       if (mounted) {
@@ -208,10 +241,12 @@ class _PhotoScreenState extends State<PhotoScreen> {
     setState(() {
       _busy = true;
       _batchSaved.clear();
+      _batchProcessed.clear();
       _batchProgress = 0.0;
     });
 
     final savedList = <SavedFile>[];
+    final processedList = <ProcessedImage>[];
     try {
       final reqWidth = _enableResize ? int.tryParse(_widthCtrl.text) : null;
       final reqHeight = _enableResize ? int.tryParse(_heightCtrl.text) : null;
@@ -225,6 +260,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
           resize: resizeMode,
           width: reqWidth,
           height: reqHeight,
+          targetSizeBytes: _targetSizeBytes,
         );
 
         final out = await PhotoService.instance.process(imgItem.bytes, opts);
@@ -234,12 +270,14 @@ class _PhotoScreenState extends State<PhotoScreen> {
 
         final saved = await FileSaver.instance.saveImage(out.bytes, fileName);
         savedList.add(saved);
+        processedList.add(out);
 
         if (!mounted) return;
+        final targetStr = _targetSizeBytes != null ? ' • Target: ${humanSize(_targetSizeBytes!)}' : '';
         context.read<AppStore>().addActivity(
               ToolKind.imageConverter,
               fileName,
-              '${_selectedFormat.toUpperCase()} • ${out.width}×${out.height} • ${humanSize(out.sizeBytes)}',
+              '${_selectedFormat.toUpperCase()} • ${out.width}×${out.height} • ${humanSize(out.sizeBytes)}$targetStr',
               savedPath: saved.path,
             );
 
@@ -249,7 +287,8 @@ class _PhotoScreenState extends State<PhotoScreen> {
       }
 
       setState(() {
-        _batchSaved = savedList;
+        _batchSaved.addAll(savedList);
+        _batchProcessed.addAll(processedList);
       });
     } catch (e) {
       if (mounted) {
@@ -268,8 +307,8 @@ class _PhotoScreenState extends State<PhotoScreen> {
 
     return AppScaffold(
       title: 'Image Converter',
-      subtitle: 'Convert your images to any format',
-      helpText: 'Convert single or batch images to JPG, PNG, WebP, JPEG, or GIF entirely offline. Adjust quality compression and optionally resize while maintaining aspect ratio.',
+      subtitle: 'Convert and optimize your images offline',
+      helpText: 'Convert single or batch images to JPG, PNG, WebP, JPEG, or GIF. Set target file size in KB or MB, control quality, or resize exact pixel dimensions.',
       bottomBar: hasInput
           ? PrimaryButton(
               label: _tabIndex == 0 ? 'Convert Image' : 'Convert ${_batchImages.length} Images',
@@ -281,7 +320,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Segmented Tabs matching Image 3 ("Single Image" vs "Batch Convert")
+          // Segmented Tabs ("Single Image" vs "Batch Convert")
           SegmentedTabs(
             tabs: const [
               (label: 'Single Image', icon: Icons.image_outlined),
@@ -292,7 +331,9 @@ class _PhotoScreenState extends State<PhotoScreen> {
               setState(() {
                 _tabIndex = i;
                 _lastSaved = null;
+                _lastProcessed = null;
                 _batchSaved.clear();
+                _batchProcessed.clear();
               });
             },
           ),
@@ -324,10 +365,12 @@ class _PhotoScreenState extends State<PhotoScreen> {
               _buildBatchImagesList(),
           ],
 
-          // Conversion options (Format chips, Quality slider, Resize toggle)
+          // Conversion options
           if (hasInput) ...[
             const SizedBox(height: 20),
             _buildFormatSection(),
+            const SizedBox(height: 20),
+            _buildTargetSizeSection(),
             const SizedBox(height: 20),
             _buildQualitySection(),
             const SizedBox(height: 20),
@@ -346,51 +389,22 @@ class _PhotoScreenState extends State<PhotoScreen> {
           ],
 
           // Saved result card on Single completion
-          if (_lastSaved != null && _tabIndex == 0) ...[
+          if (_lastSaved != null && _lastProcessed != null && _tabIndex == 0) ...[
             const SizedBox(height: 20),
-            SavedResultCard(
-              title: 'Image converted',
-              detail: '${_selectedFormat.toUpperCase()} • ${humanSize(_lastResultSize)} • ${_lastSaved!.name}',
-              location: _lastSaved!.prettyLocation,
-              onOpen: () => FileSaver.instance.open(_lastSaved!.path),
-              onShare: () => FileSaver.instance.share(_lastSaved!.path, text: _lastSaved!.name),
-            ),
+            _buildSingleResultCard(),
           ],
 
           // Saved summary on Batch completion
           if (_batchSaved.isNotEmpty && _tabIndex == 1) ...[
             const SizedBox(height: 20),
-            PkCard(
-              color: AppColors.successBg,
-              borderColor: const Color(0xFFA7F3D0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 22),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${_batchSaved.length} images converted successfully',
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'All files converted to ${_selectedFormat.toUpperCase()} and saved in storage.',
-                    style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
-                  ),
-                ],
-              ),
-            ),
+            _buildBatchResultCard(),
           ],
         ],
       ),
     );
   }
 
-  // Selected image card matching Image 3
+  // Selected image card
   Widget _buildSingleImageCard() {
     final img = _singleImage!;
     final dim = img.width > 0 && img.height > 0 ? '${img.width} × ${img.height}' : '';
@@ -450,6 +464,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
                 setState(() {
                   _singleImage = null;
                   _lastSaved = null;
+                  _lastProcessed = null;
                 });
               },
               child: const SizedBox(
@@ -518,6 +533,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
                       setState(() {
                         _batchImages.removeAt(i);
                         _batchSaved.clear();
+                        _batchProcessed.clear();
                       });
                     },
                   ),
@@ -535,7 +551,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
     );
   }
 
-  // "Convert to" chips row matching Image 3 (JPG, PNG, WebP, JPEG, GIF)
+  // Format selection chips (JPG, PNG, WebP, JPEG, GIF)
   Widget _buildFormatSection() {
     const formats = ['JPG', 'PNG', 'WebP', 'JPEG', 'GIF'];
     return Column(
@@ -560,7 +576,191 @@ class _PhotoScreenState extends State<PhotoScreen> {
     );
   }
 
-  // Quality slider matching Image 3
+  // Target File Size section with KB/MB selector and presets
+  Widget _buildTargetSizeSection() {
+    const presets = [
+      (label: '100 KB', value: 100.0, unit: 'KB'),
+      (label: '200 KB', value: 200.0, unit: 'KB'),
+      (label: '500 KB', value: 500.0, unit: 'KB'),
+      (label: '1 MB', value: 1.0, unit: 'MB'),
+      (label: '2 MB', value: 2.0, unit: 'MB'),
+      (label: '5 MB', value: 5.0, unit: 'MB'),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Target File Size',
+                  style: TextStyle(
+                    fontFamily: AppTheme.fontFamily,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.ink,
+                  ),
+                ),
+                Text(
+                  _enableTargetSize
+                      ? 'Optimize output to stay within target'
+                      : 'Disabled (normal conversion)',
+                  style: const TextStyle(
+                    fontFamily: AppTheme.fontFamily,
+                    fontSize: 12,
+                    color: AppColors.muted,
+                  ),
+                ),
+              ],
+            ),
+            Switch(
+              value: _enableTargetSize,
+              activeThumbColor: AppColors.primary,
+              onChanged: (v) => setState(() => _enableTargetSize = v),
+            ),
+          ],
+        ),
+        if (_enableTargetSize) ...[
+          const SizedBox(height: 12),
+          // Input field and unit toggle
+          Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: TextField(
+                  controller: _targetSizeCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: 'Desired Size',
+                    hintText: 'e.g. 500',
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              // KB / MB Toggle
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.line),
+                ),
+                child: Row(
+                  children: [
+                    _buildUnitButton('KB'),
+                    _buildUnitButton('MB'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Presets row
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final p in presets)
+                InkWell(
+                  onTap: () => _applyTargetPreset(p.value, p.unit),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: (_targetUnit == p.unit && _targetSizeCtrl.text == (p.value == p.value.roundToDouble() ? '${p.value.toInt()}' : '${p.value}'))
+                          ? AppColors.primary.withValues(alpha: 0.12)
+                          : AppColors.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: (_targetUnit == p.unit && _targetSizeCtrl.text == (p.value == p.value.roundToDouble() ? '${p.value.toInt()}' : '${p.value}'))
+                            ? AppColors.primary
+                            : AppColors.line,
+                      ),
+                    ),
+                    child: Text(
+                      p.label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: (_targetUnit == p.unit && _targetSizeCtrl.text == (p.value == p.value.roundToDouble() ? '${p.value.toInt()}' : '${p.value}'))
+                            ? AppColors.primary
+                            : AppColors.ink,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Format-specific explanation
+          _buildFormatNotice(),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildUnitButton(String unit) {
+    final isSelected = _targetUnit == unit;
+    return InkWell(
+      onTap: () => setState(() => _targetUnit = unit),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          unit,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: isSelected ? Colors.white : AppColors.muted,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFormatNotice() {
+    String msg;
+    if (_selectedFormat == 'PNG') {
+      msg = 'PNG is a lossless format. PocketKnife scales dimensions smoothly while preserving aspect ratio to meet your target file size without compression artifacts.';
+    } else if (_selectedFormat == 'GIF') {
+      msg = 'GIF uses an indexed 256-color palette. PocketKnife scales dimensions to fit your desired file size.';
+    } else {
+      msg = 'Iterative quality compression is applied first. Dimensions are gradually scaled down only if quality reduction alone cannot achieve the target.';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, size: 16, color: AppColors.muted),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              msg,
+              style: const TextStyle(fontSize: 11.5, height: 1.35, color: AppColors.muted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Quality slider
   Widget _buildQualitySection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -568,14 +768,24 @@ class _PhotoScreenState extends State<PhotoScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
-              'Quality',
-              style: TextStyle(
-                fontFamily: AppTheme.fontFamily,
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-                color: AppColors.ink,
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Quality',
+                  style: TextStyle(
+                    fontFamily: AppTheme.fontFamily,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.ink,
+                  ),
+                ),
+                if (_enableTargetSize)
+                  const Text(
+                    'Ceiling / starting quality for target optimization',
+                    style: TextStyle(fontSize: 11, color: AppColors.muted),
+                  ),
+              ],
             ),
             Text(
               '$_quality%',
@@ -610,7 +820,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
     );
   }
 
-  // "Resize (Optional)" Section matching Image 3
+  // Exact Pixel Resize Section (NO percentage slider)
   Widget _buildResizeSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -714,6 +924,203 @@ class _PhotoScreenState extends State<PhotoScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  // Detailed measured results card on Single completion
+  Widget _buildSingleResultCard() {
+    final proc = _lastProcessed!;
+    final saved = _lastSaved!;
+    final isTargetSet = proc.targetSizeBytes != null && proc.targetSizeBytes! > 0;
+    final success = proc.targetAchieved;
+    final reduction = proc.reductionPercentage;
+
+    return PkCard(
+      color: success ? AppColors.successBg : const Color(0xFFFFFBEB),
+      borderColor: success ? const Color(0xFFA7F3D0) : const Color(0xFFFDE68A),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                success ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                color: success ? AppColors.success : const Color(0xFFD97706),
+                size: 22,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  success
+                      ? (isTargetSet ? 'Target File Size Achieved' : 'Image Converted Successfully')
+                      : 'Closest Target Size Reached',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15.5,
+                    color: AppColors.ink,
+                  ),
+                ),
+              ),
+              if (isTargetSet)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: success ? const Color(0xFFD1FAE5) : const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    success ? 'TARGET MET' : 'LIMIT REACHED',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      color: success ? const Color(0xFF065F46) : const Color(0xFF92400E),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            proc.statusMessage,
+            style: TextStyle(
+              fontSize: 12.5,
+              color: success ? const Color(0xFF047857) : const Color(0xFFB45309),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Metrics box
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.8),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: success ? const Color(0xFFD1FAE5) : const Color(0xFFFDE68A),
+              ),
+            ),
+            child: Column(
+              children: [
+                _buildMetricRow('Original Size', humanSize(proc.originalSizeBytes)),
+                if (isTargetSet)
+                  _buildMetricRow('Target Size', humanSize(proc.targetSizeBytes!)),
+                _buildMetricRow(
+                  'Final Size',
+                  humanSize(proc.sizeBytes),
+                  isHighlight: true,
+                ),
+                if (reduction > 0)
+                  _buildMetricRow(
+                    'Size Reduction',
+                    '-${reduction.toStringAsFixed(1)}%',
+                    valueColor: AppColors.success,
+                  ),
+                _buildMetricRow('Final Dimensions', '${proc.width} × ${proc.height} px'),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(saved.prettyLocation, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => FileSaver.instance.open(saved.path),
+                  icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                  label: const Text('Open'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.ink,
+                    side: const BorderSide(color: AppColors.lineStrong),
+                    minimumSize: const Size(0, 44),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => FileSaver.instance.share(saved.path, text: saved.name),
+                  icon: const Icon(Icons.share_outlined, size: 16),
+                  label: const Text('Share'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.ink,
+                    side: const BorderSide(color: AppColors.lineStrong),
+                    minimumSize: const Size(0, 44),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricRow(String label, String value, {bool isHighlight = false, Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 12.5, color: AppColors.muted, fontWeight: FontWeight.w500),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: isHighlight ? FontWeight.w800 : FontWeight.w600,
+              color: valueColor ?? AppColors.ink,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Summary on Batch completion
+  Widget _buildBatchResultCard() {
+    final totalOriginal = _batchProcessed.fold<int>(0, (sum, p) => sum + p.originalSizeBytes);
+    final totalFinal = _batchProcessed.fold<int>(0, (sum, p) => sum + p.sizeBytes);
+    final metCount = _batchProcessed.where((p) => p.targetAchieved).length;
+    final isTargetSet = _targetSizeBytes != null && _targetSizeBytes! > 0;
+    final totalReduction = totalOriginal > 0 && totalOriginal > totalFinal
+        ? ((totalOriginal - totalFinal) / totalOriginal * 100).toStringAsFixed(1)
+        : '0';
+
+    return PkCard(
+      color: AppColors.successBg,
+      borderColor: const Color(0xFFA7F3D0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 22),
+              const SizedBox(width: 8),
+              Text(
+                '${_batchSaved.length} images converted successfully',
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Converted to ${_selectedFormat.toUpperCase()} • Total: ${humanSize(totalOriginal)} → ${humanSize(totalFinal)} (-$totalReduction%)',
+            style: const TextStyle(fontSize: 12.5, color: AppColors.ink, fontWeight: FontWeight.w500),
+          ),
+          if (isTargetSet) ...[
+            const SizedBox(height: 4),
+            Text(
+              '$metCount of ${_batchProcessed.length} images met target size (${humanSize(_targetSizeBytes!)})',
+              style: const TextStyle(fontSize: 12, color: AppColors.muted),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

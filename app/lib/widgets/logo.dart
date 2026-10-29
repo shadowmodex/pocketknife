@@ -24,7 +24,19 @@ class BrandLogo extends StatelessWidget {
           ),
         ],
       ),
-      child: CustomPaint(painter: _BladePainter(), size: Size(size, size)),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: Image.asset(
+          'assets/images/logo.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => CustomPaint(
+            painter: _BladePainter(),
+            size: Size(size, size),
+          ),
+        ),
+      ),
     );
   }
 }

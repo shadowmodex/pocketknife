@@ -1,4 +1,6 @@
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:pocketknife/models/models.dart';
 import 'package:pocketknife/services/photo_service.dart';
 
@@ -81,6 +83,112 @@ void main() {
       expect(reconstructed.name, item.name);
       expect(reconstructed.meta, item.meta);
       expect(reconstructed.savedPath, item.savedPath);
+    });
+  });
+
+  group('PhotoService Target File Size Optimization', () {
+    late Uint8List testJpegBytes;
+
+    setUp(() {
+      // Create a 200x100 test image with rich color content
+      final image = img.Image(width: 200, height: 100);
+      for (var y = 0; y < 100; y++) {
+        for (var x = 0; x < 200; x++) {
+          image.setPixelRgb(x, y, (x * 13) % 256, (y * 19) % 256, ((x + y) * 23) % 256);
+        }
+      }
+      testJpegBytes = Uint8List.fromList(img.encodeJpg(image, quality: 95));
+    });
+
+    test('normal conversion without target size retains dimensions', () async {
+      final res = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(format: PicFormat.jpeg, quality: 90),
+      );
+
+      expect(res.width, 200);
+      expect(res.height, 100);
+      expect(res.targetSizeBytes, isNull);
+      expect(res.targetAchieved, true);
+      expect(res.format, PicFormat.jpeg);
+    });
+
+    test('achieves target file size using quality reduction while preserving dimensions', () async {
+      // Pick a reasonable target that can be met by quality reduction alone
+      final target = (testJpegBytes.length * 0.6).round();
+      final res = await PhotoService.instance.process(
+        testJpegBytes,
+        PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 95,
+          targetSizeBytes: target,
+        ),
+      );
+
+      expect(res.sizeBytes, lessThanOrEqualTo(target));
+      expect(res.targetAchieved, true);
+      expect(res.width, 200); // Dimensions preserved!
+      expect(res.height, 100);
+      expect(res.reductionPercentage, greaterThan(0));
+    });
+
+    test('falls back to gradual dimension scaling when quality reduction alone cannot fit', () async {
+      // Pick an aggressive target that quality reduction alone cannot reach
+      const aggressiveTarget = 750; // bytes
+      final res = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 95,
+          targetSizeBytes: aggressiveTarget,
+        ),
+      );
+
+      expect(res.sizeBytes, lessThanOrEqualTo(aggressiveTarget));
+      expect(res.targetAchieved, true);
+      expect(res.width, lessThan(200)); // Scaled dimensions
+      expect(res.height, lessThan(100));
+      // Aspect ratio preserved (200 / 100 = 2.0)
+      final ratio = res.width / res.height;
+      expect((ratio - 2.0).abs(), lessThan(0.2));
+    });
+
+    test('PNG downscales dimensions to meet target file size', () async {
+      final pngImage = img.Image(width: 150, height: 150);
+      for (var y = 0; y < 150; y++) {
+        for (var x = 0; x < 150; x++) {
+          pngImage.setPixelRgb(x, y, (x * 7) % 256, (y * 11) % 256, ((x + y) * 17) % 256);
+        }
+      }
+      final pngBytes = Uint8List.fromList(img.encodePng(pngImage));
+      final target = (pngBytes.length * 0.35).round();
+
+      final res = await PhotoService.instance.process(
+        pngBytes,
+        PhotoOptions(
+          format: PicFormat.png,
+          targetSizeBytes: target,
+        ),
+      );
+
+      expect(res.sizeBytes, lessThanOrEqualTo(target));
+      expect(res.targetAchieved, true);
+      expect(res.format, PicFormat.png);
+      expect(res.width, lessThan(150));
+    });
+
+    test('reports status when target is unreachable without crashing', () async {
+      // Completely impossible target of 10 bytes
+      final res = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          targetSizeBytes: 10,
+        ),
+      );
+
+      expect(res.targetAchieved, false);
+      expect(res.statusMessage, contains('Closest'));
     });
   });
 }
