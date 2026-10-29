@@ -150,6 +150,7 @@ class ProcessedImage {
   final CompressionMode mode;
   final int? achievedQuality;
   final bool targetAchieved;
+  final bool isOriginalPreserved;
   final String statusMessage;
   final String? warningMessage;
 
@@ -165,6 +166,7 @@ class ProcessedImage {
     this.mode = CompressionMode.highQuality,
     this.achievedQuality,
     this.targetAchieved = true,
+    this.isOriginalPreserved = false,
     this.statusMessage = 'Converted successfully',
     this.warningMessage,
   });
@@ -216,8 +218,30 @@ class PhotoService {
       );
     }
 
-    // Never inflate an image that is already smaller than the requested target
+    // A. Original is already at or below requested target
     if (input.length <= targetBytes) {
+      // If user did not explicitly request resizing and format is identical:
+      // Preserve original file directly without needlessly re-encoding into a larger file.
+      final isSameFormat = _isSameFormat(input, o.format);
+      if (!userExplicitResize && isSameFormat) {
+        return ProcessedImage(
+          bytes: input,
+          width: origW,
+          height: origH,
+          originalWidth: origW,
+          originalHeight: origH,
+          format: o.format,
+          originalSizeBytes: input.length,
+          targetSizeBytes: targetBytes,
+          mode: o.mode,
+          achievedQuality: null,
+          targetAchieved: true,
+          isOriginalPreserved: true,
+          statusMessage: 'Original is already below target size. Preserved original file.',
+        );
+      }
+
+      // If format changed or dimensions were explicitly set, test encoding
       final out = await _encode(base, o.format, o.quality);
       if (out.length <= targetBytes) {
         return ProcessedImage(
@@ -237,7 +261,7 @@ class PhotoService {
       }
     }
 
-    // Optimization when Target File Size is active
+    // B. Target size optimization when targetBytes < input.length (or re-encoded exceeds target)
     if (o.format.isLossy) {
       return _optimizeLossy(input, base, origW, origH, userExplicitResize, o, targetBytes);
     } else {
@@ -247,11 +271,13 @@ class PhotoService {
 
   /// Quality-first bounded optimization for lossy formats (JPEG, WebP).
   ///
-  /// In High Quality mode:
-  /// - Enforces a strict minimum quality floor of 85.
-  /// - NEVER downscales dimensions automatically.
-  /// - If target cannot be met within quality floor, returns the cleanest result at quality 85
-  ///   with a clear warning.
+  /// Safe optimization pipeline:
+  /// 1. Measures actual output bytes.
+  /// 2. Never accepts an output larger than the original when reducing file size.
+  /// 3. In High Quality mode, strictly enforces quality floor (85) and 100% original dimensions.
+  /// 4. In Balanced / Smallest Size, carefully tests bounded dimension downscaling.
+  /// 5. If target cannot be reached, returns best acceptable smaller result (< input.length).
+  ///    If no smaller acceptable result exists, preserves original image.
   Future<ProcessedImage> _optimizeLossy(
     Uint8List input,
     img.Image base,
@@ -264,7 +290,7 @@ class PhotoService {
     final floorQ = o.mode.qualityFloor;
     final ceilingQ = math.max(floorQ, o.quality.clamp(1, 100));
 
-    // 1. Measure output bytes at quality ceiling
+    // 1. Measure output bytes at quality ceiling on full dimensions
     final atCeiling = await _encode(base, o.format, ceilingQ);
     if (atCeiling.length <= targetBytes) {
       return ProcessedImage(
@@ -283,7 +309,7 @@ class PhotoService {
       );
     }
 
-    // 2. Measure output bytes at mode's quality floor
+    // 2. Measure output bytes at mode's quality floor on full dimensions
     final atFloor = await _encode(base, o.format, floorQ);
     if (atFloor.length <= targetBytes) {
       // Target is achievable within [floorQ..ceilingQ] without altering dimensions!
@@ -304,87 +330,106 @@ class PhotoService {
       );
     }
 
-    // 3. At this point, output at floor quality still exceeds targetBytes.
-    // In High Quality mode OR when user explicitly specified custom dimensions:
-    // DO NOT automatically downscale dimensions.
-    if (!o.mode.allowDimensionScaling || userExplicitResize) {
-      final modeName = o.mode.label;
-      return ProcessedImage(
+    // 3. Size at floor quality on full dimensions still exceeds targetBytes.
+    // Track best candidate that is strictly smaller than the original input (< input.length).
+    ({Uint8List bytes, int width, int height, int quality})? bestSmallerCandidate;
+
+    if (atFloor.length < input.length) {
+      bestSmallerCandidate = (
         bytes: atFloor,
         width: base.width,
         height: base.height,
+        quality: floorQ,
+      );
+    }
+
+    // 4. Test permitted dimension downscaling if mode permits and user didn't request explicit resize
+    if (o.mode.allowDimensionScaling && !userExplicitResize) {
+      for (final scale in o.mode.dimensionScales) {
+        final newW = math.max(1, (base.width * scale).round());
+        final newH = math.max(1, (base.height * scale).round());
+        final scaled = img.copyResize(
+          base,
+          width: newW,
+          height: newH,
+          interpolation: img.Interpolation.average,
+        );
+
+        final scaledAtFloor = await _encode(scaled, o.format, floorQ);
+        if (scaledAtFloor.length <= targetBytes) {
+          // Fits within target! Find highest quality >= floorQ that still fits
+          final result = await _binarySearchQuality(scaled, o.format, targetBytes, floorQ, ceilingQ);
+          return ProcessedImage(
+            bytes: result.bytes,
+            width: newW,
+            height: newH,
+            originalWidth: origW,
+            originalHeight: origH,
+            format: o.format,
+            originalSizeBytes: input.length,
+            targetSizeBytes: targetBytes,
+            mode: o.mode,
+            achievedQuality: result.quality,
+            targetAchieved: true,
+            statusMessage: 'Target achieved with limited downscaling to $newW×$newH at quality ${result.quality}%',
+          );
+        }
+
+        // Check if this candidate is strictly smaller than original input
+        if (scaledAtFloor.length < input.length) {
+          if (bestSmallerCandidate == null || scaledAtFloor.length < bestSmallerCandidate.bytes.length) {
+            bestSmallerCandidate = (
+              bytes: scaledAtFloor,
+              width: newW,
+              height: newH,
+              quality: floorQ,
+            );
+          }
+        }
+      }
+    }
+
+    // 5. Target was NOT met within mode constraints.
+    // Safe fallback:
+    // If a smaller result was found (< input.length), return it with an honest warning.
+    // If NO candidate was smaller than input.length, PRESERVE THE ORIGINAL! Never output a larger file!
+    if (bestSmallerCandidate != null) {
+      final achievedSize = bestSmallerCandidate.bytes.length;
+      final reduction = ((input.length - achievedSize) / input.length * 100).toStringAsFixed(1);
+
+      return ProcessedImage(
+        bytes: bestSmallerCandidate.bytes,
+        width: bestSmallerCandidate.width,
+        height: bestSmallerCandidate.height,
         originalWidth: origW,
         originalHeight: origH,
         format: o.format,
         originalSizeBytes: input.length,
         targetSizeBytes: targetBytes,
         mode: o.mode,
-        achievedQuality: floorQ,
+        achievedQuality: bestSmallerCandidate.quality,
         targetAchieved: false,
-        statusMessage: 'Quality floor reached ($floorQ%). Target could not be achieved without quality degradation.',
-        warningMessage: 'Target of ${_formatBytes(targetBytes)} could not be reached within the $modeName floor (min $floorQ%). Original dimensions and visual fidelity were preserved.',
+        statusMessage: 'Closest achieved: ${_formatBytes(achievedSize)} (-$reduction%)',
+        warningMessage: 'Target of ${_formatBytes(targetBytes)} could not be reached within ${o.mode.label} constraints (min $floorQ%). Produced best available reduction (${_formatBytes(achievedSize)}).',
       );
     }
 
-    // 4. In Balanced or Smallest Size modes: test permitted dimension scales
-    Uint8List bestBytes = atFloor;
-    int bestW = base.width;
-    int bestH = base.height;
-    int bestQ = floorQ;
-
-    for (final scale in o.mode.dimensionScales) {
-      final newW = math.max(1, (base.width * scale).round());
-      final newH = math.max(1, (base.height * scale).round());
-      final scaled = img.copyResize(
-        base,
-        width: newW,
-        height: newH,
-        interpolation: img.Interpolation.average,
-      );
-
-      final scaledAtFloor = await _encode(scaled, o.format, floorQ);
-      if (scaledAtFloor.length <= targetBytes) {
-        // Fits at this scale! Search for highest quality >= floorQ that fits
-        final result = await _binarySearchQuality(scaled, o.format, targetBytes, floorQ, ceilingQ);
-        return ProcessedImage(
-          bytes: result.bytes,
-          width: newW,
-          height: newH,
-          originalWidth: origW,
-          originalHeight: origH,
-          format: o.format,
-          originalSizeBytes: input.length,
-          targetSizeBytes: targetBytes,
-          mode: o.mode,
-          achievedQuality: result.quality,
-          targetAchieved: true,
-          statusMessage: 'Target achieved with limited downscaling to $newW×$newH at quality ${result.quality}%',
-        );
-      }
-
-      if (scaledAtFloor.length < bestBytes.length) {
-        bestBytes = scaledAtFloor;
-        bestW = newW;
-        bestH = newH;
-        bestQ = floorQ;
-      }
-    }
-
-    // Target could not be met even with mode's permitted downscaling
+    // Preserve original image
     return ProcessedImage(
-      bytes: bestBytes,
-      width: bestW,
-      height: bestH,
+      bytes: input,
+      width: origW,
+      height: origH,
       originalWidth: origW,
       originalHeight: origH,
       format: o.format,
       originalSizeBytes: input.length,
       targetSizeBytes: targetBytes,
       mode: o.mode,
-      achievedQuality: bestQ,
+      achievedQuality: null,
       targetAchieved: false,
-      statusMessage: 'Closest reached: ${_formatBytes(bestBytes.length)} (Target: ${_formatBytes(targetBytes)})',
-      warningMessage: 'Target of ${_formatBytes(targetBytes)} could not be met within ${o.mode.label} limits without unacceptable quality loss.',
+      isOriginalPreserved: true,
+      statusMessage: 'Original preserved: no smaller acceptable result found',
+      warningMessage: 'Target of ${_formatBytes(targetBytes)} could not be reached within ${o.mode.label} quality constraints (min $floorQ%) without exceeding original file size (${_formatBytes(input.length)}). Preserved original image.',
     );
   }
 
@@ -416,17 +461,56 @@ class PhotoService {
       );
     }
 
-    // In High Quality mode OR with explicit user dimensions: never automatically downscale dimensions
-    if (!o.mode.allowDimensionScaling || userExplicitResize) {
-      final formatName = o.format.label;
-      final formatExplanation = o.format == PicFormat.png
-          ? 'PNG uses lossless compression and cannot reduce file size without reducing dimensions.'
-          : '$formatName cannot meet the target size without reducing dimensions.';
+    ({Uint8List bytes, int width, int height})? bestSmallerCandidate;
+    if (initial.length < input.length) {
+      bestSmallerCandidate = (bytes: initial, width: base.width, height: base.height);
+    }
 
+    if (o.mode.allowDimensionScaling && !userExplicitResize) {
+      for (final scale in o.mode.dimensionScales) {
+        final newW = math.max(1, (base.width * scale).round());
+        final newH = math.max(1, (base.height * scale).round());
+        final scaled = img.copyResize(
+          base,
+          width: newW,
+          height: newH,
+          interpolation: img.Interpolation.average,
+        );
+
+        final candidate = await _encode(scaled, o.format, o.quality);
+        if (candidate.length <= targetBytes) {
+          final formatNote = o.format == PicFormat.png ? ' (lossless PNG)' : '';
+          return ProcessedImage(
+            bytes: candidate,
+            width: newW,
+            height: newH,
+            originalWidth: origW,
+            originalHeight: origH,
+            format: o.format,
+            originalSizeBytes: input.length,
+            targetSizeBytes: targetBytes,
+            mode: o.mode,
+            achievedQuality: o.quality,
+            targetAchieved: true,
+            statusMessage: 'Target achieved via dimension scaling to $newW×$newH$formatNote',
+          );
+        }
+
+        if (candidate.length < input.length) {
+          if (bestSmallerCandidate == null || candidate.length < bestSmallerCandidate.bytes.length) {
+            bestSmallerCandidate = (bytes: candidate, width: newW, height: newH);
+          }
+        }
+      }
+    }
+
+    if (bestSmallerCandidate != null) {
+      final achievedSize = bestSmallerCandidate.bytes.length;
+      final reduction = ((input.length - achievedSize) / input.length * 100).toStringAsFixed(1);
       return ProcessedImage(
-        bytes: initial,
-        width: base.width,
-        height: base.height,
+        bytes: bestSmallerCandidate.bytes,
+        width: bestSmallerCandidate.width,
+        height: bestSmallerCandidate.height,
         originalWidth: origW,
         originalHeight: origH,
         format: o.format,
@@ -435,70 +519,35 @@ class PhotoService {
         mode: o.mode,
         achievedQuality: o.quality,
         targetAchieved: false,
-        statusMessage: '$formatExplanation Original dimensions preserved in High Quality mode.',
-        warningMessage: 'Target of ${_formatBytes(targetBytes)} could not be reached. $formatExplanation',
+        statusMessage: 'Closest achieved: ${_formatBytes(achievedSize)} (-$reduction%)',
+        warningMessage: 'Target of ${_formatBytes(targetBytes)} could not be reached within ${o.mode.label} limits. Produced best available reduction (${_formatBytes(achievedSize)}).',
       );
     }
 
-    // In Balanced or Smallest Size modes: test permitted scales
-    Uint8List bestBytes = initial;
-    int bestW = base.width;
-    int bestH = base.height;
-
-    for (final scale in o.mode.dimensionScales) {
-      final newW = math.max(1, (base.width * scale).round());
-      final newH = math.max(1, (base.height * scale).round());
-      final scaled = img.copyResize(
-        base,
-        width: newW,
-        height: newH,
-        interpolation: img.Interpolation.average,
-      );
-
-      final candidate = await _encode(scaled, o.format, o.quality);
-      if (candidate.length <= targetBytes) {
-        final formatNote = o.format == PicFormat.png ? ' (lossless PNG)' : '';
-        return ProcessedImage(
-          bytes: candidate,
-          width: newW,
-          height: newH,
-          originalWidth: origW,
-          originalHeight: origH,
-          format: o.format,
-          originalSizeBytes: input.length,
-          targetSizeBytes: targetBytes,
-          mode: o.mode,
-          achievedQuality: o.quality,
-          targetAchieved: true,
-          statusMessage: 'Target achieved via dimension scaling to $newW×$newH$formatNote',
-        );
-      }
-
-      if (candidate.length < bestBytes.length) {
-        bestBytes = candidate;
-        bestW = newW;
-        bestH = newH;
-      }
-    }
+    // Preserve original if no smaller acceptable output can be produced
+    final formatExplanation = o.format == PicFormat.png
+        ? 'PNG is a lossless format and cannot reduce bytes below original without further downscaling.'
+        : '${o.format.label} cannot meet target without exceeding original file size.';
 
     return ProcessedImage(
-      bytes: bestBytes,
-      width: bestW,
-      height: bestH,
+      bytes: input,
+      width: origW,
+      height: origH,
       originalWidth: origW,
       originalHeight: origH,
       format: o.format,
       originalSizeBytes: input.length,
       targetSizeBytes: targetBytes,
       mode: o.mode,
-      achievedQuality: o.quality,
+      achievedQuality: null,
       targetAchieved: false,
-      statusMessage: 'Closest reached: ${_formatBytes(bestBytes.length)} (Target: ${_formatBytes(targetBytes)})',
-      warningMessage: 'Target of ${_formatBytes(targetBytes)} could not be reached within ${o.mode.label} dimension limits.',
+      isOriginalPreserved: true,
+      statusMessage: 'Original preserved: no smaller acceptable result found',
+      warningMessage: 'Target of ${_formatBytes(targetBytes)} could not be reached. $formatExplanation Original image preserved.',
     );
   }
 
-  /// Binary search quality in [minQ..maxQ] to find the highest quality setting that fits <= [targetBytes].
+  /// Binary search quality in [minQ..maxQ] to find highest quality setting that fits <= [targetBytes].
   Future<({Uint8List bytes, int quality})> _binarySearchQuality(
     img.Image image,
     PicFormat format,
@@ -577,6 +626,23 @@ class PhotoService {
         } catch (_) {
           return Uint8List.fromList(img.encodeJpg(im, quality: q));
         }
+    }
+  }
+
+  bool _isSameFormat(Uint8List data, PicFormat format) {
+    final decoder = img.findDecoderForData(data);
+    if (decoder == null) return false;
+    switch (format) {
+      case PicFormat.jpeg:
+        return decoder is img.JpegDecoder;
+      case PicFormat.png:
+        return decoder is img.PngDecoder;
+      case PicFormat.webp:
+        return decoder is img.WebPDecoder;
+      case PicFormat.gif:
+        return decoder is img.GifDecoder;
+      case PicFormat.bmp:
+        return decoder is img.BmpDecoder;
     }
   }
 

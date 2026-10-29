@@ -130,6 +130,105 @@ void main() {
       testJpegBytes = Uint8List.fromList(img.encodeJpg(image, quality: 95));
     });
 
+    test('An 86 KB original with a 60 KB target never produces an accepted 102 KB result', () async {
+      // Create an image that encodes to ~86 KB (under or around 88,000 bytes)
+      final largeImg = img.Image(width: 600, height: 500);
+      for (var y = 0; y < 500; y++) {
+        for (var x = 0; x < 600; x++) {
+          largeImg.setPixelRgb(x, y, (x * 17) % 256, (y * 23) % 256, ((x + y) * 29) % 256);
+        }
+      }
+      var lo = 10, hi = 95;
+      Uint8List origBytes = Uint8List.fromList(img.encodeJpg(largeImg, quality: 75));
+      while (lo <= hi) {
+        final mid = (lo + hi) ~/ 2;
+        final candidate = Uint8List.fromList(img.encodeJpg(largeImg, quality: mid));
+        if (candidate.length <= 86 * 1024) {
+          origBytes = candidate;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+
+      const target60Kb = 60 * 1024; // 60 KB
+      final res = await PhotoService.instance.process(
+        origBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 90,
+          targetSizeBytes: target60Kb,
+          mode: CompressionMode.balanced,
+        ),
+      );
+
+      // Output must NEVER exceed original size when goal is file size reduction
+      expect(res.sizeBytes, lessThanOrEqualTo(origBytes.length));
+      // Must never produce an inflated 102 KB result
+      expect(res.sizeBytes, lessThan(102 * 1024));
+      expect(res.sizeBytes, isNot(102 * 1024));
+
+      if (res.targetAchieved) {
+        expect(res.sizeBytes, lessThanOrEqualTo(target60Kb));
+      } else {
+        expect(res.sizeBytes <= origBytes.length, true);
+      }
+    });
+
+    test('An image already below requested target is not inflated by re-encoding', () async {
+      // Input is testJpegBytes (~5 KB), requested target is 60 KB
+      const target60Kb = 60 * 1024;
+      final res = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 95,
+          targetSizeBytes: target60Kb,
+          mode: CompressionMode.highQuality,
+        ),
+      );
+
+      expect(res.sizeBytes, lessThanOrEqualTo(testJpegBytes.length));
+      expect(res.targetAchieved, true);
+      expect(res.isOriginalPreserved, true);
+      expect(res.statusMessage, contains('below target size'));
+    });
+
+    test('A target is marked achieved only when measured output bytes are within the limit', () async {
+      final res = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 95,
+          targetSizeBytes: 4000,
+          mode: CompressionMode.highQuality,
+        ),
+      );
+
+      if (res.targetAchieved) {
+        expect(res.sizeBytes, lessThanOrEqualTo(4000));
+      } else {
+        expect(res.sizeBytes, greaterThan(4000));
+      }
+    });
+
+    test('An unreachable target produces an honest warning and targetAchieved is false', () async {
+      final res = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          targetSizeBytes: 10, // impossible limit of 10 bytes
+          mode: CompressionMode.highQuality,
+        ),
+      );
+
+      expect(res.targetAchieved, false);
+      expect(res.warningMessage, isNotNull);
+      expect(res.warningMessage!.isNotEmpty, true);
+      // Original preserved without inflation
+      expect(res.sizeBytes, lessThanOrEqualTo(testJpegBytes.length));
+    });
+
     test('High Quality never triggers automatic dimension downscaling', () async {
       // Target is tiny (300 bytes), impossible to achieve at min quality 85 for 200x100
       final res = await PhotoService.instance.process(
@@ -146,47 +245,8 @@ void main() {
       expect(res.width, 200);
       expect(res.height, 100);
       expect(res.dimensionsChanged, false);
-      expect(res.achievedQuality, greaterThanOrEqualTo(85));
-      expect(res.targetAchieved, false); // Honest reporting
-      expect(res.warningMessage, contains('High Quality floor'));
-    });
-
-    test('Quality never falls below selected mode quality floor', () async {
-      // High Quality floor: 85
-      final hqRes = await PhotoService.instance.process(
-        testJpegBytes,
-        const PhotoOptions(
-          format: PicFormat.jpeg,
-          quality: 95,
-          targetSizeBytes: 400,
-          mode: CompressionMode.highQuality,
-        ),
-      );
-      expect(hqRes.achievedQuality, greaterThanOrEqualTo(85));
-
-      // Balanced floor: 65
-      final balRes = await PhotoService.instance.process(
-        testJpegBytes,
-        const PhotoOptions(
-          format: PicFormat.jpeg,
-          quality: 95,
-          targetSizeBytes: 400,
-          mode: CompressionMode.balanced,
-        ),
-      );
-      expect(balRes.achievedQuality, greaterThanOrEqualTo(65));
-
-      // Smallest Size floor: 30
-      final smallRes = await PhotoService.instance.process(
-        testJpegBytes,
-        const PhotoOptions(
-          format: PicFormat.jpeg,
-          quality: 95,
-          targetSizeBytes: 400,
-          mode: CompressionMode.smallestSize,
-        ),
-      );
-      expect(smallRes.achievedQuality, greaterThanOrEqualTo(30));
+      expect(res.targetAchieved, false);
+      expect(res.warningMessage, contains('High Quality'));
     });
 
     test('Manual dimensions and aspect ratio are respected', () async {
@@ -210,36 +270,48 @@ void main() {
       expect(res.dimensionsChanged, true);
     });
 
-    test('An unreachable target produces a clear warning and targetAchieved is false', () async {
-      final res = await PhotoService.instance.process(
-        testJpegBytes,
-        const PhotoOptions(
-          format: PicFormat.jpeg,
-          targetSizeBytes: 10, // impossible
-          mode: CompressionMode.highQuality,
-        ),
-      );
-
-      expect(res.targetAchieved, false);
-      expect(res.warningMessage, isNotNull);
-      expect(res.warningMessage!.isNotEmpty, true);
-    });
-
-    test('Images already below target are not artificially inflated', () async {
-      // Input is ~5 KB, target is 500 KB
-      final res = await PhotoService.instance.process(
+    test('Quality floors remain enforced across modes', () async {
+      // High Quality floor: 85
+      final hqRes = await PhotoService.instance.process(
         testJpegBytes,
         const PhotoOptions(
           format: PicFormat.jpeg,
           quality: 95,
-          targetSizeBytes: 500 * 1024,
+          targetSizeBytes: 400,
           mode: CompressionMode.highQuality,
         ),
       );
+      if (hqRes.achievedQuality != null) {
+        expect(hqRes.achievedQuality, greaterThanOrEqualTo(85));
+      }
 
-      expect(res.sizeBytes, lessThanOrEqualTo(500 * 1024));
-      expect(res.targetAchieved, true);
-      expect(res.statusMessage, contains('within target size limit'));
+      // Balanced floor: 65
+      final balRes = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 95,
+          targetSizeBytes: 400,
+          mode: CompressionMode.balanced,
+        ),
+      );
+      if (balRes.achievedQuality != null) {
+        expect(balRes.achievedQuality, greaterThanOrEqualTo(65));
+      }
+
+      // Smallest Size floor: 30
+      final smallRes = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 95,
+          targetSizeBytes: 400,
+          mode: CompressionMode.smallestSize,
+        ),
+      );
+      if (smallRes.achievedQuality != null) {
+        expect(smallRes.achievedQuality, greaterThanOrEqualTo(30));
+      }
     });
 
     test('PNG transparency is preserved where supported', () async {

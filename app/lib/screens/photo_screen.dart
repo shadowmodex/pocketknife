@@ -212,7 +212,10 @@ class _PhotoScreenState extends State<PhotoScreen> {
       final out = await PhotoService.instance.process(_singleImage!.bytes, opts);
       final rawName = _singleImage!.name;
       final base = rawName.contains('.') ? rawName.substring(0, rawName.lastIndexOf('.')) : rawName;
-      final fileName = '${base}_pk.${_picFormat.ext}';
+      final ext = out.isOriginalPreserved && rawName.contains('.')
+          ? rawName.substring(rawName.lastIndexOf('.') + 1)
+          : _picFormat.ext;
+      final fileName = '${base}_pk.$ext';
 
       final saved = await FileSaver.instance.saveImage(out.bytes, fileName);
       if (!mounted) return;
@@ -271,7 +274,10 @@ class _PhotoScreenState extends State<PhotoScreen> {
         final out = await PhotoService.instance.process(imgItem.bytes, opts);
         final rawName = imgItem.name;
         final base = rawName.contains('.') ? rawName.substring(0, rawName.lastIndexOf('.')) : rawName;
-        final fileName = '${base}_pk.${_picFormat.ext}';
+        final ext = out.isOriginalPreserved && rawName.contains('.')
+            ? rawName.substring(rawName.lastIndexOf('.') + 1)
+            : _picFormat.ext;
+        final fileName = '${base}_pk.$ext';
 
         final saved = await FileSaver.instance.saveImage(out.bytes, fileName);
         savedList.add(saved);
@@ -612,7 +618,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
                 ),
                 Text(
                   _enableTargetSize
-                      ? 'Quality-first optimization with ${_compressionMode.label}'
+                      ? 'Quality-first optimization with ${_compressionMode.label} (1 KB = 1,024 B)'
                       : 'Disabled (normal conversion)',
                   style: const TextStyle(
                     fontFamily: AppTheme.fontFamily,
@@ -1095,7 +1101,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
                 child: Text(
                   success
                       ? (isTargetSet ? 'Target File Size Achieved' : 'Image Converted Successfully')
-                      : 'Quality Floor Preserved',
+                      : (proc.isOriginalPreserved ? 'Original Image Preserved' : 'Closest Size Reached'),
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15.5,
@@ -1107,15 +1113,21 @@ class _PhotoScreenState extends State<PhotoScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: success ? const Color(0xFFD1FAE5) : const Color(0xFFFEF3C7),
+                    color: success
+                        ? const Color(0xFFD1FAE5)
+                        : (proc.isOriginalPreserved ? const Color(0xFFE0F2FE) : const Color(0xFFFEF3C7)),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    success ? 'TARGET MET' : 'FLOOR PRESERVED',
+                    success
+                        ? 'TARGET MET'
+                        : (proc.isOriginalPreserved ? 'PROTECTED' : 'BEST REDUCTION'),
                     style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w800,
-                      color: success ? const Color(0xFF065F46) : const Color(0xFF92400E),
+                      color: success
+                          ? const Color(0xFF065F46)
+                          : (proc.isOriginalPreserved ? const Color(0xFF0369A1) : const Color(0xFF92400E)),
                     ),
                   ),
                 ),
