@@ -47,10 +47,11 @@ class _PhotoScreenState extends State<PhotoScreen> {
 
   // Conversion options
   String _selectedFormat = 'JPG'; // 'JPG', 'PNG', 'WebP', 'JPEG', 'GIF'
-  int _quality = 90;
+  int _quality = 95;
 
-  // Target File Size state
+  // Target File Size & Compression Mode state
   bool _enableTargetSize = false;
+  CompressionMode _compressionMode = CompressionMode.highQuality;
   final TextEditingController _targetSizeCtrl = TextEditingController(text: '500');
   String _targetUnit = 'KB'; // 'KB' or 'MB'
 
@@ -60,10 +61,12 @@ class _PhotoScreenState extends State<PhotoScreen> {
   final TextEditingController _widthCtrl = TextEditingController();
   final TextEditingController _heightCtrl = TextEditingController();
 
+  // Results & Before/After preview state
   bool _busy = false;
   double _batchProgress = 0.0;
   SavedFile? _lastSaved;
   ProcessedImage? _lastProcessed;
+  int _previewModeIndex = 2; // 0 = Before, 1 = After, 2 = Side-by-Side
   final List<SavedFile> _batchSaved = [];
   final List<ProcessedImage> _batchProcessed = [];
 
@@ -203,6 +206,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
         width: reqWidth,
         height: reqHeight,
         targetSizeBytes: _targetSizeBytes,
+        mode: _compressionMode,
       );
 
       final out = await PhotoService.instance.process(_singleImage!.bytes, opts);
@@ -217,7 +221,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
       context.read<AppStore>().addActivity(
             ToolKind.imageConverter,
             fileName,
-            '${_selectedFormat.toUpperCase()} • ${out.width}×${out.height} • ${humanSize(out.sizeBytes)}$targetStr',
+            '${_selectedFormat.toUpperCase()} • ${out.width}×${out.height} • ${humanSize(out.sizeBytes)}$targetStr • ${_compressionMode.label}',
             savedPath: saved.path,
           );
 
@@ -261,6 +265,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
           width: reqWidth,
           height: reqHeight,
           targetSizeBytes: _targetSizeBytes,
+          mode: _compressionMode,
         );
 
         final out = await PhotoService.instance.process(imgItem.bytes, opts);
@@ -308,7 +313,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
     return AppScaffold(
       title: 'Image Converter',
       subtitle: 'Convert and optimize your images offline',
-      helpText: 'Convert single or batch images to JPG, PNG, WebP, JPEG, or GIF. Set target file size in KB or MB, control quality, or resize exact pixel dimensions.',
+      helpText: 'Convert single or batch images to JPG, PNG, WebP, JPEG, or GIF. Choose quality-first compression modes, specify target file sizes, or set exact pixel dimensions without degradation.',
       bottomBar: hasInput
           ? PrimaryButton(
               label: _tabIndex == 0 ? 'Convert Image' : 'Convert ${_batchImages.length} Images',
@@ -576,7 +581,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
     );
   }
 
-  // Target File Size section with KB/MB selector and presets
+  // Target File Size section with 3 Compression Modes, KB/MB selector, and presets
   Widget _buildTargetSizeSection() {
     const presets = [
       (label: '100 KB', value: 100.0, unit: 'KB'),
@@ -607,7 +612,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
                 ),
                 Text(
                   _enableTargetSize
-                      ? 'Optimize output to stay within target'
+                      ? 'Quality-first optimization with ${_compressionMode.label}'
                       : 'Disabled (normal conversion)',
                   style: const TextStyle(
                     fontFamily: AppTheme.fontFamily,
@@ -620,13 +625,91 @@ class _PhotoScreenState extends State<PhotoScreen> {
             Switch(
               value: _enableTargetSize,
               activeThumbColor: AppColors.primary,
-              onChanged: (v) => setState(() => _enableTargetSize = v),
+              onChanged: (v) {
+                setState(() {
+                  _enableTargetSize = v;
+                  // High Quality is the default whenever Target File Size is enabled
+                  if (v) _compressionMode = CompressionMode.highQuality;
+                });
+              },
             ),
           ],
         ),
         if (_enableTargetSize) ...[
-          const SizedBox(height: 12),
-          // Input field and unit toggle
+          const SizedBox(height: 14),
+
+          // 1. Compression Mode Cards (High Quality, Balanced, Smallest Size)
+          const Text(
+            'Compression Mode',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.ink,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildModeCard(
+                  mode: CompressionMode.highQuality,
+                  title: 'High Quality',
+                  subtitle: 'Min Q: 85 • No resize',
+                  icon: Icons.verified_rounded,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildModeCard(
+                  mode: CompressionMode.balanced,
+                  title: 'Balanced',
+                  subtitle: 'Min Q: 65 • Limited',
+                  icon: Icons.balance_rounded,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildModeCard(
+                  mode: CompressionMode.smallestSize,
+                  title: 'Smallest Size',
+                  subtitle: 'Min Q: 30 • Aggressive',
+                  icon: Icons.compress_rounded,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _compressionMode.description,
+            style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.3),
+          ),
+          if (_compressionMode == CompressionMode.smallestSize) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, size: 16, color: Color(0xFFB45309)),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Smallest Size prioritizes small bytes. May produce noticeable compression artifacts or blur.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF92400E), fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 14),
+
+          // 2. Input field and unit toggle
           Row(
             children: [
               Expanded(
@@ -635,7 +718,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
                   controller: _targetSizeCtrl,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
-                    labelText: 'Desired Size',
+                    labelText: 'Desired File Size',
                     hintText: 'e.g. 500',
                     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -660,7 +743,8 @@ class _PhotoScreenState extends State<PhotoScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          // Presets row
+
+          // 3. Presets row
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -697,10 +781,63 @@ class _PhotoScreenState extends State<PhotoScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          // Format-specific explanation
+
+          // 4. Format-specific explanation
           _buildFormatNotice(),
         ],
       ],
+    );
+  }
+
+  Widget _buildModeCard({
+    required CompressionMode mode,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    final isSelected = _compressionMode == mode;
+    return InkWell(
+      onTap: () => setState(() => _compressionMode = mode),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.primary.withValues(alpha: 0.08) : AppColors.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected ? AppColors.primary : AppColors.line,
+            width: isSelected ? 1.6 : 1.0,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: isSelected ? AppColors.primary : AppColors.muted,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                color: isSelected ? AppColors.primary : AppColors.ink,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 10,
+                color: isSelected ? AppColors.primary : AppColors.muted,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -730,11 +867,15 @@ class _PhotoScreenState extends State<PhotoScreen> {
   Widget _buildFormatNotice() {
     String msg;
     if (_selectedFormat == 'PNG') {
-      msg = 'PNG is a lossless format. PocketKnife scales dimensions smoothly while preserving aspect ratio to meet your target file size without compression artifacts.';
+      msg = _compressionMode == CompressionMode.highQuality
+          ? 'PNG is a lossless format and cannot reduce bytes without downscaling. High Quality mode strictly preserves original dimensions.'
+          : 'PNG uses lossless compression. PocketKnife uses limited dimension downscaling in ${_compressionMode.label} mode to approach your target size.';
     } else if (_selectedFormat == 'GIF') {
-      msg = 'GIF uses an indexed 256-color palette. PocketKnife scales dimensions to fit your desired file size.';
+      msg = 'GIF uses indexed colors. PocketKnife preserves all animation frames and transparency when present.';
     } else {
-      msg = 'Iterative quality compression is applied first. Dimensions are gradually scaled down only if quality reduction alone cannot achieve the target.';
+      msg = _compressionMode == CompressionMode.highQuality
+          ? 'Quality is optimized between 85% and $_quality% ceiling. High Quality never automatically downscales dimensions.'
+          : 'Quality is optimized above ${_compressionMode.qualityFloor}%. Limited dimension downscaling is applied only if quality reduction alone cannot fit.';
     }
 
     return Container(
@@ -760,7 +901,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
     );
   }
 
-  // Quality slider
+  // Quality slider with mode interaction explanation
   Widget _buildQualitySection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -780,11 +921,12 @@ class _PhotoScreenState extends State<PhotoScreen> {
                     color: AppColors.ink,
                   ),
                 ),
-                if (_enableTargetSize)
-                  const Text(
-                    'Ceiling / starting quality for target optimization',
-                    style: TextStyle(fontSize: 11, color: AppColors.muted),
-                  ),
+                Text(
+                  _enableTargetSize
+                      ? 'Starting quality ceiling (Mode floor: ${_compressionMode.qualityFloor}%)'
+                      : 'Fixed encoding quality',
+                  style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                ),
               ],
             ),
             Text(
@@ -927,7 +1069,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
     );
   }
 
-  // Detailed measured results card on Single completion
+  // Detailed measured results card on Single completion with Before-and-After preview
   Widget _buildSingleResultCard() {
     final proc = _lastProcessed!;
     final saved = _lastSaved!;
@@ -953,7 +1095,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
                 child: Text(
                   success
                       ? (isTargetSet ? 'Target File Size Achieved' : 'Image Converted Successfully')
-                      : 'Closest Target Size Reached',
+                      : 'Quality Floor Preserved',
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15.5,
@@ -969,7 +1111,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    success ? 'TARGET MET' : 'LIMIT REACHED',
+                    success ? 'TARGET MET' : 'FLOOR PRESERVED',
                     style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w800,
@@ -988,12 +1130,37 @@ class _PhotoScreenState extends State<PhotoScreen> {
               fontWeight: FontWeight.w500,
             ),
           ),
+          if (proc.warningMessage != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.shield_outlined, size: 16, color: Color(0xFFB45309)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      proc.warningMessage!,
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF92400E), height: 1.35),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
+
           // Metrics box
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.8),
+              color: Colors.white.withValues(alpha: 0.85),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: success ? const Color(0xFFD1FAE5) : const Color(0xFFFDE68A),
@@ -1009,17 +1176,30 @@ class _PhotoScreenState extends State<PhotoScreen> {
                   humanSize(proc.sizeBytes),
                   isHighlight: true,
                 ),
+                if (isTargetSet)
+                  _buildMetricRow('Compression Mode', proc.mode.label),
+                if (proc.achievedQuality != null)
+                  _buildMetricRow('Achieved Quality', '${proc.achievedQuality}%'),
                 if (reduction > 0)
                   _buildMetricRow(
                     'Size Reduction',
                     '-${reduction.toStringAsFixed(1)}%',
                     valueColor: AppColors.success,
                   ),
-                _buildMetricRow('Final Dimensions', '${proc.width} × ${proc.height} px'),
+                _buildMetricRow(
+                  'Dimensions',
+                  proc.dimensionsChanged
+                      ? '${proc.originalWidth}×${proc.originalHeight} → ${proc.width}×${proc.height}'
+                      : '${proc.width} × ${proc.height} (100% preserved)',
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
+
+          // Visual Before-and-After Inspection Widget
+          _buildBeforeAfterPreview(),
+
+          const SizedBox(height: 10),
           Text(saved.prettyLocation, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
           const SizedBox(height: 14),
           Row(
@@ -1052,6 +1232,164 @@ class _PhotoScreenState extends State<PhotoScreen> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Interactive Before / After Visual Comparison
+  Widget _buildBeforeAfterPreview() {
+    final orig = _singleImage!;
+    final proc = _lastProcessed!;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.compare_rounded, size: 18, color: AppColors.primary),
+                  SizedBox(width: 6),
+                  Text(
+                    'Visual Quality Comparison',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.ink),
+                  ),
+                ],
+              ),
+              // View toggle buttons: Side-by-Side vs Before vs After
+              SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: 0, label: Text('Before', style: TextStyle(fontSize: 10.5))),
+                  ButtonSegment(value: 1, label: Text('After', style: TextStyle(fontSize: 10.5))),
+                  ButtonSegment(value: 2, label: Text('Both', style: TextStyle(fontSize: 10.5))),
+                ],
+                selected: {_previewModeIndex},
+                onSelectionChanged: (set) => setState(() => _previewModeIndex = set.first),
+                style: SegmentedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          if (_previewModeIndex == 2)
+            // Side-by-Side
+            Row(
+              children: [
+                Expanded(
+                  child: _buildImageComparePane(
+                    title: 'Original (Before)',
+                    bytes: orig.bytes,
+                    sizeText: humanSize(orig.sizeBytes),
+                    dimText: '${proc.originalWidth} × ${proc.originalHeight}',
+                    badgeColor: const Color(0xFF64748B),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildImageComparePane(
+                    title: 'Converted (After)',
+                    bytes: proc.bytes,
+                    sizeText: humanSize(proc.sizeBytes),
+                    dimText: '${proc.width} × ${proc.height}',
+                    badgeColor: proc.targetAchieved ? AppColors.success : const Color(0xFFD97706),
+                  ),
+                ),
+              ],
+            )
+          else if (_previewModeIndex == 0)
+            // Single Before pane
+            _buildImageComparePane(
+              title: 'Original (Before)',
+              bytes: orig.bytes,
+              sizeText: humanSize(orig.sizeBytes),
+              dimText: '${proc.originalWidth} × ${proc.originalHeight}',
+              badgeColor: const Color(0xFF64748B),
+              height: 160,
+            )
+          else
+            // Single After pane
+            _buildImageComparePane(
+              title: 'Converted (After • ${proc.mode.label})',
+              bytes: proc.bytes,
+              sizeText: humanSize(proc.sizeBytes),
+              dimText: '${proc.width} × ${proc.height}',
+              badgeColor: proc.targetAchieved ? AppColors.success : const Color(0xFFD97706),
+              height: 160,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImageComparePane({
+    required String title,
+    required Uint8List bytes,
+    required String sizeText,
+    required String dimText,
+    required Color badgeColor,
+    double height = 110,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: badgeColor.withValues(alpha: 0.12),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: badgeColor),
+                  ),
+                ),
+                Text(
+                  sizeText,
+                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: badgeColor),
+                ),
+              ],
+            ),
+          ),
+          ClipRRect(
+            child: Image.memory(
+              bytes,
+              height: height,
+              width: double.infinity,
+              fit: BoxFit.contain,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: Text(
+              dimText,
+              style: const TextStyle(fontSize: 10, color: AppColors.muted),
+            ),
           ),
         ],
       ),
@@ -1109,13 +1447,13 @@ class _PhotoScreenState extends State<PhotoScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Converted to ${_selectedFormat.toUpperCase()} • Total: ${humanSize(totalOriginal)} → ${humanSize(totalFinal)} (-$totalReduction%)',
+            'Converted to ${_selectedFormat.toUpperCase()} (${_compressionMode.label}) • Total: ${humanSize(totalOriginal)} → ${humanSize(totalFinal)} (-$totalReduction%)',
             style: const TextStyle(fontSize: 12.5, color: AppColors.ink, fontWeight: FontWeight.w500),
           ),
           if (isTargetSet) ...[
             const SizedBox(height: 4),
             Text(
-              '$metCount of ${_batchProcessed.length} images met target size (${humanSize(_targetSizeBytes!)})',
+              '$metCount of ${_batchProcessed.length} images met target size (${humanSize(_targetSizeBytes!)}) within ${_compressionMode.label} quality constraints.',
               style: const TextStyle(fontSize: 12, color: AppColors.muted),
             ),
           ],

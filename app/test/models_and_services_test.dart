@@ -57,6 +57,36 @@ void main() {
       expect(PicFormatMeta.fromName('gif'), PicFormat.gif);
       expect(PicFormatMeta.fromName('bmp'), PicFormat.bmp);
     });
+
+    test('identifies formats supporting transparency', () {
+      expect(PicFormat.png.supportsTransparency, true);
+      expect(PicFormat.webp.supportsTransparency, true);
+      expect(PicFormat.gif.supportsTransparency, true);
+      expect(PicFormat.jpeg.supportsTransparency, false);
+      expect(PicFormat.bmp.supportsTransparency, false);
+    });
+  });
+
+  group('CompressionMode', () {
+    test('defines all three compression modes with valid quality floors', () {
+      expect(CompressionMode.values.length, 3);
+      expect(CompressionMode.highQuality.qualityFloor, 85);
+      expect(CompressionMode.balanced.qualityFloor, 65);
+      expect(CompressionMode.smallestSize.qualityFloor, 30);
+    });
+
+    test('High Quality strictly forbids automatic dimension downscaling', () {
+      expect(CompressionMode.highQuality.allowDimensionScaling, false);
+      expect(CompressionMode.highQuality.dimensionScales, isEmpty);
+    });
+
+    test('Balanced and Smallest Size permit dimension downscaling', () {
+      expect(CompressionMode.balanced.allowDimensionScaling, true);
+      expect(CompressionMode.balanced.dimensionScales, isNotEmpty);
+      expect(CompressionMode.smallestSize.allowDimensionScaling, true);
+      expect(CompressionMode.smallestSize.dimensionScales.length,
+          greaterThan(CompressionMode.balanced.dimensionScales.length));
+    });
   });
 
   group('ActivityItem', () {
@@ -86,11 +116,11 @@ void main() {
     });
   });
 
-  group('PhotoService Target File Size Optimization', () {
+  group('PhotoService Quality-First Compression Engine', () {
     late Uint8List testJpegBytes;
 
     setUp(() {
-      // Create a 200x100 test image with rich color content
+      // Create a 200x100 test image with rich high-frequency colors
       final image = img.Image(width: 200, height: 100);
       for (var y = 0; y < 100; y++) {
         for (var x = 0; x < 200; x++) {
@@ -100,95 +130,167 @@ void main() {
       testJpegBytes = Uint8List.fromList(img.encodeJpg(image, quality: 95));
     });
 
-    test('normal conversion without target size retains dimensions', () async {
+    test('High Quality never triggers automatic dimension downscaling', () async {
+      // Target is tiny (300 bytes), impossible to achieve at min quality 85 for 200x100
       final res = await PhotoService.instance.process(
         testJpegBytes,
-        const PhotoOptions(format: PicFormat.jpeg, quality: 90),
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 95,
+          targetSizeBytes: 300,
+          mode: CompressionMode.highQuality,
+        ),
       );
 
+      // High Quality must NEVER automatically reduce dimensions
       expect(res.width, 200);
       expect(res.height, 100);
-      expect(res.targetSizeBytes, isNull);
-      expect(res.targetAchieved, true);
-      expect(res.format, PicFormat.jpeg);
+      expect(res.dimensionsChanged, false);
+      expect(res.achievedQuality, greaterThanOrEqualTo(85));
+      expect(res.targetAchieved, false); // Honest reporting
+      expect(res.warningMessage, contains('High Quality floor'));
     });
 
-    test('achieves target file size using quality reduction while preserving dimensions', () async {
-      // Pick a reasonable target that can be met by quality reduction alone
-      final target = (testJpegBytes.length * 0.6).round();
-      final res = await PhotoService.instance.process(
-        testJpegBytes,
-        PhotoOptions(
-          format: PicFormat.jpeg,
-          quality: 95,
-          targetSizeBytes: target,
-        ),
-      );
-
-      expect(res.sizeBytes, lessThanOrEqualTo(target));
-      expect(res.targetAchieved, true);
-      expect(res.width, 200); // Dimensions preserved!
-      expect(res.height, 100);
-      expect(res.reductionPercentage, greaterThan(0));
-    });
-
-    test('falls back to gradual dimension scaling when quality reduction alone cannot fit', () async {
-      // Pick an aggressive target that quality reduction alone cannot reach
-      const aggressiveTarget = 750; // bytes
-      final res = await PhotoService.instance.process(
+    test('Quality never falls below selected mode quality floor', () async {
+      // High Quality floor: 85
+      final hqRes = await PhotoService.instance.process(
         testJpegBytes,
         const PhotoOptions(
           format: PicFormat.jpeg,
           quality: 95,
-          targetSizeBytes: aggressiveTarget,
+          targetSizeBytes: 400,
+          mode: CompressionMode.highQuality,
         ),
       );
+      expect(hqRes.achievedQuality, greaterThanOrEqualTo(85));
 
-      expect(res.sizeBytes, lessThanOrEqualTo(aggressiveTarget));
-      expect(res.targetAchieved, true);
-      expect(res.width, lessThan(200)); // Scaled dimensions
-      expect(res.height, lessThan(100));
-      // Aspect ratio preserved (200 / 100 = 2.0)
-      final ratio = res.width / res.height;
-      expect((ratio - 2.0).abs(), lessThan(0.2));
-    });
-
-    test('PNG downscales dimensions to meet target file size', () async {
-      final pngImage = img.Image(width: 150, height: 150);
-      for (var y = 0; y < 150; y++) {
-        for (var x = 0; x < 150; x++) {
-          pngImage.setPixelRgb(x, y, (x * 7) % 256, (y * 11) % 256, ((x + y) * 17) % 256);
-        }
-      }
-      final pngBytes = Uint8List.fromList(img.encodePng(pngImage));
-      final target = (pngBytes.length * 0.35).round();
-
-      final res = await PhotoService.instance.process(
-        pngBytes,
-        PhotoOptions(
-          format: PicFormat.png,
-          targetSizeBytes: target,
+      // Balanced floor: 65
+      final balRes = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 95,
+          targetSizeBytes: 400,
+          mode: CompressionMode.balanced,
         ),
       );
+      expect(balRes.achievedQuality, greaterThanOrEqualTo(65));
 
-      expect(res.sizeBytes, lessThanOrEqualTo(target));
-      expect(res.targetAchieved, true);
-      expect(res.format, PicFormat.png);
-      expect(res.width, lessThan(150));
+      // Smallest Size floor: 30
+      final smallRes = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 95,
+          targetSizeBytes: 400,
+          mode: CompressionMode.smallestSize,
+        ),
+      );
+      expect(smallRes.achievedQuality, greaterThanOrEqualTo(30));
     });
 
-    test('reports status when target is unreachable without crashing', () async {
-      // Completely impossible target of 10 bytes
+    test('Manual dimensions and aspect ratio are respected', () async {
       final res = await PhotoService.instance.process(
         testJpegBytes,
         const PhotoOptions(
           format: PicFormat.jpeg,
-          targetSizeBytes: 10,
+          quality: 90,
+          resize: ResizeMode.exact,
+          width: 120,
+          height: 60,
+          targetSizeBytes: 2000,
+          mode: CompressionMode.highQuality,
+        ),
+      );
+
+      expect(res.width, 120);
+      expect(res.height, 60);
+      expect(res.originalWidth, 200);
+      expect(res.originalHeight, 100);
+      expect(res.dimensionsChanged, true);
+    });
+
+    test('An unreachable target produces a clear warning and targetAchieved is false', () async {
+      final res = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          targetSizeBytes: 10, // impossible
+          mode: CompressionMode.highQuality,
         ),
       );
 
       expect(res.targetAchieved, false);
-      expect(res.statusMessage, contains('Closest'));
+      expect(res.warningMessage, isNotNull);
+      expect(res.warningMessage!.isNotEmpty, true);
+    });
+
+    test('Images already below target are not artificially inflated', () async {
+      // Input is ~5 KB, target is 500 KB
+      final res = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 95,
+          targetSizeBytes: 500 * 1024,
+          mode: CompressionMode.highQuality,
+        ),
+      );
+
+      expect(res.sizeBytes, lessThanOrEqualTo(500 * 1024));
+      expect(res.targetAchieved, true);
+      expect(res.statusMessage, contains('within target size limit'));
+    });
+
+    test('PNG transparency is preserved where supported', () async {
+      // Create a 40x40 image with transparent background and an opaque red circle
+      final transparentImg = img.Image(width: 40, height: 40, numChannels: 4);
+      transparentImg.clear(img.ColorRgba8(0, 0, 0, 0)); // fully transparent
+      transparentImg.setPixelRgba(20, 20, 255, 0, 0, 255); // opaque center
+
+      final pngBytes = Uint8List.fromList(img.encodePng(transparentImg));
+      final res = await PhotoService.instance.process(
+        pngBytes,
+        const PhotoOptions(format: PicFormat.png),
+      );
+
+      final decoded = img.decodePng(res.bytes)!;
+      // Check that corner pixel is transparent
+      expect(decoded.getPixel(0, 0).a, 0);
+      // Check that center pixel is opaque
+      expect(decoded.getPixel(20, 20).a, 255);
+    });
+
+    test('Animated GIF behavior is preserved where supported', () async {
+      // Create a 2-frame animated GIF
+      final frame1 = img.Image(width: 30, height: 30);
+      frame1.clear(img.ColorRgb8(255, 0, 0)); // Frame 1 red
+      final frame2 = img.Image(width: 30, height: 30);
+      frame2.clear(img.ColorRgb8(0, 0, 255)); // Frame 2 blue
+      frame1.addFrame(frame2);
+
+      final animatedGifBytes = Uint8List.fromList(img.encodeGif(frame1));
+      final res = await PhotoService.instance.process(
+        animatedGifBytes,
+        const PhotoOptions(format: PicFormat.gif),
+      );
+
+      final decodedGif = img.decodeGif(res.bytes)!;
+      expect(decodedGif.numFrames, 2); // Both animation frames preserved!
+    });
+
+    test('Reported file sizes match actual output bytes', () async {
+      final res = await PhotoService.instance.process(
+        testJpegBytes,
+        const PhotoOptions(
+          format: PicFormat.jpeg,
+          quality: 88,
+          targetSizeBytes: 4000,
+          mode: CompressionMode.highQuality,
+        ),
+      );
+
+      expect(res.sizeBytes, res.bytes.length);
     });
   });
 }
