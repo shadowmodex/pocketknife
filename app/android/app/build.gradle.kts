@@ -45,10 +45,15 @@ android {
             val storeFileEnv = System.getenv("KEYSTORE_PATH") ?: System.getenv("STORE_FILE")
             val storePasswordEnv = System.getenv("STORE_PASSWORD")
 
-            val resolvedStoreFile = storeFileProp ?: storeFileEnv
-            val resolvedStorePassword = storePasswordProp ?: storePasswordEnv
-            val resolvedKeyAlias = keyAliasProp ?: keyAliasEnv
-            val resolvedKeyPassword = keyPasswordProp ?: keyPasswordEnv
+            val rawStoreFile = storeFileProp ?: storeFileEnv
+            val rawStorePassword = storePasswordProp ?: storePasswordEnv
+            val rawKeyAlias = keyAliasProp ?: keyAliasEnv
+            val rawKeyPassword = keyPasswordProp ?: keyPasswordEnv
+
+            val resolvedStoreFile = rawStoreFile?.replace("\ufeff", "")?.trim()
+            val resolvedStorePassword = rawStorePassword?.replace("\ufeff", "")?.trim()
+            val resolvedKeyAlias = rawKeyAlias?.replace("\ufeff", "")?.trim()
+            val resolvedKeyPassword = rawKeyPassword?.replace("\ufeff", "")?.trim()
 
             if (!resolvedStoreFile.isNullOrBlank() &&
                 !resolvedStorePassword.isNullOrBlank() &&
